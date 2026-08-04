@@ -1,0 +1,10 @@
+# Secrets and tokens — never commit
+.env
+auth/
+
+# Local raw API dumps (large; the site uses processed data in docs/data)
+data/raw/
+
+# Python
+__pycache__/
+.venv/
