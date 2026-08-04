@@ -135,7 +135,8 @@ views.home = () => {
 
   const careers = mgrs.map(mk => ({mk, ...L.managers[mk].career}))
     .filter(c => c.seasons >= 3);
-  const bestPct = [...careers].sort((a, b) => b.pct - a.pct)[0];
+  const bestPct = mgrs.map(mk => ({mk, ...L.managers[mk].career}))
+    .filter(c => c.seasons >= 2).sort((a, b) => b.pct - a.pct)[0];
   const bridesmaid = [...careers].filter(c => !c.titles && c.seasons >= 5 && c.mk !== bestPct.mk)
     .sort((a, b) => b.w - a.w)[0];
   const throne = Object.keys(L.managers)
@@ -174,7 +175,7 @@ views.home = () => {
     <a class="card" href="#/honors"><div class="kicker">The throne</div>
       <h3>${throne.slice(0, 2).map(x => `${mdisp(x.mk)} ${x.titles}`).join(" — ")}</h3>
       <p class="dim small">${throne.length > 2 ? "Then " + throne.slice(2).map(x => `${mdisp(x.mk)} (${x.titles})`).join(", ") + "." : ""} Full trophy room in Honors.</p></a>
-    <a class="card" href="#/managers"><div class="kicker">Best career record · 3+ seasons</div>
+    <a class="card" href="#/managers"><div class="kicker">Best career record · 2+ seasons</div>
       <h3>${mdisp(bestPct.mk)} — ${pctf(bestPct.pct)}</h3>
       <p class="dim small">${rec(bestPct.w, bestPct.l, bestPct.t)} over ${bestPct.seasons} seasons, ${bestPct.titles} title${bestPct.titles === 1 ? "" : "s"}. One-year wonders (looking at you, Kadin) need a longer résumé.</p></a>
     ${bridesmaid ? `<a class="card" href="#/manager/${encodeURIComponent(bridesmaid.mk)}"><div class="kicker">The bridesmaid award</div>
