@@ -407,6 +407,7 @@ views.manager = (mk) => {
     <div class="stat"><div class="v num ${c.avg_ppg_norm >= 100 ? "pos" : "neg"}">${num(c.avg_ppg_norm, 1)}%</div><div class="l">Career PPG vs league mean</div></div>
     <div class="stat"><div class="v num ${c.luck >= 0 ? "pos" : "neg"}">${plus(c.luck)}</div><div class="l">Career luck (wins vs deserved)</div></div>
     <div class="stat"><div class="v num">${M.streaks.longest_win}W / ${M.streaks.longest_loss}L</div><div class="l">Longest streaks</div></div>
+    <div class="stat"><div class="v num ${M.streaks.current > 0 ? "pos" : M.streaks.current < 0 ? "neg" : ""}">${M.streaks.current > 0 ? M.streaks.current + "W" : M.streaks.current < 0 ? (-M.streaks.current) + "L" : "—"}</div><div class="l">Current streak${isCurrent(mk) ? "" : " (when last seen)"}</div></div>
   </div>
   <p class="legend"><span>Finish quality = final standing rescaled for league size (100% = champion, 0% = last), so results from the 8-, 10-, 12-, and 14-team eras compare fairly — finishing 3rd of 12 counts for more than 3rd of 8.</span></p>
 
