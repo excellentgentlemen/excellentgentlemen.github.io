@@ -408,6 +408,7 @@ views.manager = (mk) => {
     <div class="stat"><div class="v num ${c.luck >= 0 ? "pos" : "neg"}">${plus(c.luck)}</div><div class="l">Career luck (wins vs deserved)</div></div>
     <div class="stat"><div class="v num">${M.streaks.longest_win}W / ${M.streaks.longest_loss}L</div><div class="l">Longest streaks</div></div>
   </div>
+  <p class="legend"><span>Finish quality = final standing rescaled for league size (100% = champion, 0% = last), so results from the 8-, 10-, 12-, and 14-team eras compare fairly — finishing 3rd of 12 counts for more than 3rd of 8.</span></p>
 
   <div class="grid cols-3">
     <div class="card"><div class="kicker">Scoring vs league mean</div>${sparkNorm}<p class="legend"><span>${ys[0]}–${ys[ys.length - 1]} · dashed = league average (100%)</span></p></div>
