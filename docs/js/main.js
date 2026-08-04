@@ -312,6 +312,28 @@ function weekBox(y, w) {
   }).join("")}</div><p class="legend"><span>✦ weekly high score</span></p>`;
 }
 
+let _lows = null;
+const weeklyLows = () => {
+  if (_lows) return _lows;
+  _lows = {};
+  for (const y of years()) {
+    const byW = {};
+    for (const m of L.seasons[y].matchups) {
+      (byW[m.w] = byW[m.w] || []).push([m.a, m.as], [m.b, m.bs]);
+    }
+    for (const arr of Object.values(byW)) {
+      const mn = Math.min(...arr.map(x => x[1]));
+      for (const [tid, sc] of arr) {
+        if (sc === mn) {
+          const lk = mgrOfTeam(y, tid);
+          if (lk) _lows[lk] = (_lows[lk] || 0) + 1;
+        }
+      }
+    }
+  }
+  return _lows;
+};
+
 const finishQuality = mk => {
   const qs = Object.entries(L.managers[mk].seasons)
     .map(([y, s]) => {
@@ -326,7 +348,7 @@ views.managers = (q) => {
   const cur = new URLSearchParams(q || "").get("f") === "cur";
   const rows = Object.keys(L.managers)
     .filter(mk => !cur || isCurrent(mk))
-    .map(mk => ({mk, name: mname(mk), ...L.managers[mk].career, st: L.managers[mk].streaks, finq: finishQuality(mk)}));
+    .map(mk => ({mk, name: mname(mk), ...L.managers[mk].career, st: L.managers[mk].streaks, finq: finishQuality(mk), lows: weeklyLows()[mk] || 0}));
   const cols = [
     {h: "Manager", val: r => r.name, fmt: r => mlink(r.mk)},
     {h: "Szns", num: 1, val: r => r.seasons},
@@ -340,6 +362,7 @@ views.managers = (q) => {
     {h: "PPG vs mean", num: 1, val: r => r.avg_ppg_norm, fmt: r => r.avg_ppg_norm == null ? "—" : `<span class="${r.avg_ppg_norm >= 100 ? "pos" : "neg"}">${num(r.avg_ppg_norm, 1)}%</span>`},
     {h: "Luck", num: 1, val: r => r.luck, fmt: r => `<span class="${r.luck >= 0 ? "pos" : "neg"}">${plus(r.luck)}</span>`},
     {h: "Weekly highs", num: 1, val: r => r.crowns},
+    {h: "Weekly lows", num: 1, val: r => r.lows},
     {h: "Avg draft slot", num: 1, val: r => r.avg_draft_slot, fmt: r => num(r.avg_draft_slot, 1)},
     {h: "Sackos", num: 1, val: r => r.last_places, fmt: r => r.last_places ? "💀".repeat(r.last_places) : "—"},
   ];
@@ -444,23 +467,7 @@ views.honors = () => {
     const last = tids.find(t => s.standings[t]?.final_rank === tids.length);
     if (last) sackos.push({y: +y, team: teamOf(y, last), mk: mgrOfTeam(y, last)});
   }
-  const lowCounts = {};
-  for (const y of ys) {
-    const byW = {};
-    for (const m of L.seasons[y].matchups) {
-      (byW[m.w] = byW[m.w] || []).push([m.a, m.as], [m.b, m.bs]);
-    }
-    for (const arr of Object.values(byW)) {
-      const mn = Math.min(...arr.map(x => x[1]));
-      for (const [tid, sc] of arr) {
-        if (sc === mn) {
-          const lk = mgrOfTeam(y, tid);
-          if (lk) lowCounts[lk] = (lowCounts[lk] || 0) + 1;
-        }
-      }
-    }
-  }
-  const lowRows = Object.entries(lowCounts)
+  const lowRows = Object.entries(weeklyLows())
     .map(([lk, n]) => ({mk: lk, lows: n, seasons: L.managers[lk].career.seasons}))
     .sort((a, b) => b.lows - a.lows).slice(0, 10);
   let lucky = null, unlucky = null;
@@ -675,7 +682,7 @@ views.records = () => {
 
   ${sec("Highest single-week scores", "raw points", R.high_score, [
     {h: "Score", num: 1, val: r => r.score, fmt: r => `<b class="num">${num(r.score)}</b>`}])}
-  ${sec("Highest ever, era-adjusted", "% of season average", R.high_score_norm, [
+  ${sec("Highest single-week score, era-adjusted", "one week's score as % of that season's average", R.high_score_norm, [
     {h: "vs mean", num: 1, val: r => r.norm, fmt: r => `<b class="num pos">${num(r.norm, 1)}%</b>`},
     {h: "Score", num: 1, val: r => r.score, fmt: r => num(r.score)}])}
   ${sec("Lowest single-week scores", "hall of shame", R.low_score, [
