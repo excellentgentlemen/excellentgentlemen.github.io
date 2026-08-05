@@ -380,12 +380,18 @@ views.managers = (q) => {
   const cur = new URLSearchParams(q || "").get("f") === "cur";
   const rows = Object.keys(L.managers)
     .filter(mk => !cur || isCurrent(mk))
-    .map(mk => ({mk, name: mname(mk), ...L.managers[mk].career, st: L.managers[mk].streaks, finq: finishQuality(mk), lows: weeklyLows()[mk] || 0}));
+    .map(mk => {
+      let apw = 0, apl = 0;
+      for (const sn of Object.values(L.managers[mk].seasons)) { apw += sn.ap_w || 0; apl += sn.ap_l || 0; }
+      return {mk, name: mname(mk), ...L.managers[mk].career, st: L.managers[mk].streaks,
+        finq: finishQuality(mk), lows: weeklyLows()[mk] || 0, apw, apl};
+    });
   const cols = [
     {h: "Manager", val: r => r.name, fmt: r => mlink(r.mk)},
     {h: "Szns", num: 1, val: r => r.seasons},
     {h: "Record", num: 1, val: r => r.pct, fmt: r => `<span class="num">${rec(r.w, r.l, r.t)}</span>`},
     {h: "Pct", num: 1, val: r => r.pct, fmt: r => pctf(r.pct)},
+    {h: "All-play", num: 1, val: r => r.apw / Math.max(r.apw + r.apl, 1), fmt: r => `<span class="num">${r.apw}-${r.apl}</span> <span class="dim small">${pctf(r.apw / Math.max(r.apw + r.apl, 1))}</span>`},
     {h: "Titles", num: 1, val: r => r.titles, fmt: r => r.titles ? "🏆".repeat(r.titles) : "—"},
     {h: "Podiums", num: 1, val: r => r.podiums},
     {h: "Playoffs", num: 1, val: r => r.playoff_apps},
@@ -407,7 +413,8 @@ views.managers = (q) => {
     <button class="${cur ? "on" : ""}" onclick="location.hash='#/managers?f=cur'">Current members</button>
   </div>
   <div>${table(cols, rows, {sortCol: 3, sortDir: -1, rowHref: r => `#/manager/${encodeURIComponent(r.mk)}`})}</div>
-  <p class="legend"><span>“Finish quality” = average standing normalized for league size (100% = champion, 0% = last) — comparable across the 8/10/12/14-team eras, unlike raw average finish.</span>
+  <p class="legend"><span>“All-play” = your record if you'd played every team every week — pure scoring strength, schedule luck removed.</span>
+  <span>“Finish quality” = average standing normalized for league size (100% = champion, 0% = last) — comparable across the 8/10/12/14-team eras, unlike raw average finish.</span>
   <span>“PPG vs mean” = career scoring relative to each season's league average — comparable across rule eras.</span>
   <span>“Luck” = career wins above/below the all-play deserved record.</span><span>💀 = last-place finish.</span></p>
   ${(() => {
