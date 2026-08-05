@@ -8,12 +8,26 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&
 const num = (v, d = 2) => v == null ? "—" : Number(v).toFixed(d);
 const int = v => v == null ? "—" : String(v);
 const rec = (w, l, t) => `${w}-${l}${t ? "-" + t : "-0"}`;
-const pctf = p => p == null ? "—" : ("." + String(Math.round(p * 1000)).padStart(3, "0"));
+const pctf = p => p == null ? "—" : p >= 0.9995 ? "1.000" : ("." + String(Math.round(p * 1000)).padStart(3, "0"));
 const plus = v => v == null ? "—" : (v > 0 ? "+" + v : String(v));
 const mname = mk => L.managers[mk] ? L.managers[mk].name : mk;
 const isHidden = mk => /^mystery|hidden/.test(mk);
 const mdisp = mk => esc(mname(mk));
 const isCurrent = mk => !!L.managers[mk]?.seasons?.[String(Math.max(...L.league.years))];
+
+// global "current members" lens — persisted, applies to leaderboards site-wide
+let FILTER = localStorage.getItem("egl-filter") || "all";
+const curOnly = () => FILTER === "cur";
+const inc = mk => !curOnly() || isCurrent(mk);
+window.__setFilter = f => {
+  FILTER = f;
+  localStorage.setItem("egl-filter", f);
+  dispatchEvent(new Event("hashchange"));
+};
+const filterPills = (note) => `<div class="pill-tabs">
+  <button class="${curOnly() ? "" : "on"}" onclick="__setFilter('all')">All-time</button>
+  <button class="${curOnly() ? "on" : ""}" onclick="__setFilter('cur')">Current members</button>
+  ${note ? `<span class="dim small" style="align-self:center">${note}</span>` : ""}</div>`;
 const mlink = mk => `<a class="mgr-link" href="#/manager/${encodeURIComponent(mk)}">${mdisp(mk)}</a>`;
 const mkeyOf = name => String(name || "").replace(/\s+/g, " ").trim().toLowerCase();
 const years = () => L.league.years.map(String);
@@ -155,16 +169,16 @@ views.home = () => {
   const close = L.records.closest_game[0];
   const blow = L.records.biggest_blowout[0];
 
-  const careers = mgrs.map(mk => ({mk, ...L.managers[mk].career}))
+  const careers = mgrs.filter(inc).map(mk => ({mk, ...L.managers[mk].career}))
     .filter(c => c.seasons >= 3);
-  const bestPct = mgrs.map(mk => ({mk, ...L.managers[mk].career}))
+  const bestPct = mgrs.filter(inc).map(mk => ({mk, seasons: L.managers[mk].career.seasons, titles: L.managers[mk].career.titles, ...totalRec(mk)}))
     .filter(c => c.seasons >= 2).sort((a, b) => b.pct - a.pct)[0];
   const bridesmaid = [...careers].filter(c => !c.titles && c.seasons >= 5 && c.mk !== bestPct.mk)
     .sort((a, b) => b.w - a.w)[0];
-  const throne = Object.keys(L.managers)
+  const throne = Object.keys(L.managers).filter(inc)
     .map(mk => ({mk, titles: L.managers[mk].career.titles}))
     .filter(x => x.titles > 0).sort((a, b) => b.titles - a.titles);
-  const allStreaks = Object.keys(L.managers).map(mk => ({mk, ...L.managers[mk].streaks}));
+  const allStreaks = Object.keys(L.managers).filter(inc).map(mk => ({mk, ...L.managers[mk].streaks}));
   const streakBest = [...allStreaks].sort((a, b) => b.longest_win - a.longest_win)[0];
   const streakWorst = [...allStreaks].sort((a, b) => b.longest_loss - a.longest_loss)[0];
   const lucky = [...careers].sort((a, b) => b.luck - a.luck)[0];
@@ -175,6 +189,7 @@ views.home = () => {
   <h1>The Excellent Gentlemen</h1>
   <p class="sub">Born <em>League of Extraordinary Men</em>, briefly <em>Bad Boyz</em>, now permanently distinguished.
   Eleven years of glory, heartbreak, and drafting kickers too early — all of it on the record.</p>
+  ${filterPills("applies to leaderboards site-wide; history stays history")}
 
   <div class="statrow">
     <div class="stat"><div class="v num">${ys.length}</div><div class="l">Seasons</div></div>
@@ -210,6 +225,15 @@ views.home = () => {
       <h3>${mdisp(streakBest.mk)} ${streakBest.longest_win}W · ${mdisp(streakWorst.mk)} ${streakWorst.longest_loss}L</h3>
       <p class="dim small">Longest win streak and longest skid in league history — seasons roll over, streaks don't care. Playoffs included.</p></a>
     ${(() => {
+      const pool = mgrs.filter(inc).map(mk => ({mk, ...poRec(mk)})).filter(p => p.g >= 5)
+        .sort((a, b) => b.w / b.g - a.w / a.g || b.w - a.w);
+      if (!pool.length) return "";
+      const c1 = pool[0];
+      return `<a class="card" href="#/manager/${encodeURIComponent(c1.mk)}"><div class="kicker">Most clutch · playoff record, min 5 games</div>
+      <h3>${mdisp(c1.mk)} — ${c1.w}-${c1.l}</h3>
+      <p class="dim small">${pctf(c1.w / c1.g)} in the postseason. Chasing: ${pool.slice(1, 3).map(p => `${mdisp(p.mk)} ${p.w}-${p.l}`).join(" · ")}.</p></a>`;
+    })()}
+    ${(() => {
       const lo = L.records.low_score.slice(0, 2);
       if (lo.length < 2) return "";
       const line = r => `${esc(r.team)} <span class="dim">(${isHidden(mkeyOf(r.manager)) ? "?" : esc(r.manager)}, ${r.year} wk ${r.week})</span>`;
@@ -218,7 +242,7 @@ views.home = () => {
       <p class="dim small">${line(lo[0])} and ${line(lo[1])}. Scoring the weekly low is a lifestyle in this league.</p></a>`;
     })()}
     ${(() => {
-      const lowsAll = Object.entries(weeklyLows()).map(([lk, n]) => ({lk, n})).sort((a, b) => b.n - a.n);
+      const lowsAll = Object.entries(weeklyLows()).filter(([lk]) => inc(lk)).map(([lk, n]) => ({lk, n})).sort((a, b) => b.n - a.n);
       if (!lowsAll.length) return "";
       const [king, ...rest] = lowsAll;
       return `<a class="card" href="#/honors"><div class="kicker">Basement royalty · most weekly lows</div>
@@ -374,6 +398,17 @@ const weeklyLows = () => {
   return _lows;
 };
 
+const poRec = mk => {
+  let w = 0, l = 0;
+  for (const v of Object.values(L.h2h[mk] || {})) { w += v.po_w || 0; l += v.po_l || 0; }
+  return {w, l, g: w + l};
+};
+const totalRec = mk => {
+  const c = L.managers[mk].career, p = poRec(mk);
+  const w = c.w + p.w, l = c.l + p.l, t = c.t;
+  return {w, l, t, pct: (w + 0.5 * t) / Math.max(w + l + t, 1), po: p};
+};
+
 const finishQuality = mk => {
   const qs = Object.entries(L.managers[mk].seasons)
     .map(([y, s]) => {
@@ -384,25 +419,27 @@ const finishQuality = mk => {
   return qs.length ? 100 * qs.reduce((a, b) => a + b, 0) / qs.length : null;
 };
 
-views.managers = (q) => {
-  const cur = new URLSearchParams(q || "").get("f") === "cur";
+views.managers = () => {
   const rows = Object.keys(L.managers)
-    .filter(mk => !cur || isCurrent(mk))
+    .filter(inc)
     .map(mk => {
       let apw = 0, apl = 0;
       for (const sn of Object.values(L.managers[mk].seasons)) { apw += sn.ap_w || 0; apl += sn.ap_l || 0; }
+      const tot = totalRec(mk);
       return {mk, name: mname(mk), ...L.managers[mk].career, st: L.managers[mk].streaks,
-        finq: finishQuality(mk), lows: weeklyLows()[mk] || 0, apw, apl};
+        finq: finishQuality(mk), lows: weeklyLows()[mk] || 0, apw, apl,
+        tw: tot.w, tl: tot.l, tt: tot.t, tpct: tot.pct, pow: tot.po.w, pol: tot.po.l};
     });
   const cols = [
     {h: "Manager", val: r => r.name, fmt: r => mlink(r.mk)},
     {h: "Szns", num: 1, val: r => r.seasons},
-    {h: "Record", num: 1, val: r => r.pct, fmt: r => `<span class="num">${rec(r.w, r.l, r.t)}</span>`},
-    {h: "Pct", num: 1, val: r => r.pct, fmt: r => pctf(r.pct)},
+    {h: "Record", num: 1, val: r => r.tpct, fmt: r => `<span class="num">${rec(r.tw, r.tl, r.tt)}</span>`},
+    {h: "Pct", num: 1, val: r => r.tpct, fmt: r => pctf(r.tpct)},
+    {h: "Playoff rec", num: 1, val: r => (r.pow + r.pol) ? r.pow / (r.pow + r.pol) : -1, fmt: r => (r.pow + r.pol) ? `<span class="num">${r.pow}-${r.pol}</span>` : "—"},
     {h: "All-play", num: 1, val: r => r.apw / Math.max(r.apw + r.apl, 1), fmt: r => `<span class="num">${r.apw}-${r.apl}</span> <span class="dim small">${pctf(r.apw / Math.max(r.apw + r.apl, 1))}</span>`},
     {h: "Titles", num: 1, val: r => r.titles, fmt: r => r.titles ? "🏆".repeat(r.titles) : "—"},
     {h: "Podiums", num: 1, val: r => r.podiums},
-    {h: "Playoffs", num: 1, val: r => r.playoff_apps},
+    {h: "Playoff apps", num: 1, val: r => r.playoff_apps},
     {h: "Avg finish", num: 1, val: r => r.avg_finish, fmt: r => num(r.avg_finish, 1)},
     {h: "Finish quality", num: 1, val: r => r.finq, fmt: r => r.finq == null ? "—" : `<b class="num">${num(r.finq, 0)}%</b>`},
     {h: "PPG vs mean", num: 1, val: r => r.avg_ppg_norm, fmt: r => r.avg_ppg_norm == null ? "—" : `<span class="${r.avg_ppg_norm >= 100 ? "pos" : "neg"}">${num(r.avg_ppg_norm, 1)}%</span>`},
@@ -416,12 +453,10 @@ views.managers = (q) => {
   <p class="kicker">All-time</p>
   <h1>Managers</h1>
   <p class="sub">Career numbers across every season and league name. Click any column to re-sort; click a manager for the full story.</p>
-  <div class="pill-tabs">
-    <button class="${cur ? "" : "on"}" onclick="location.hash='#/managers'">All-time</button>
-    <button class="${cur ? "on" : ""}" onclick="location.hash='#/managers?f=cur'">Current members</button>
-  </div>
+  ${filterPills()}
   <div>${table(cols, rows, {sortCol: 3, sortDir: -1, rowHref: r => `#/manager/${encodeURIComponent(r.mk)}`})}</div>
-  <p class="legend"><span>“All-play” = your record if you'd played every team every week — pure scoring strength, schedule luck removed.</span>
+  <p class="legend"><span>“Record” includes playoff games; “Playoff rec” is postseason games only (placement games included).</span>
+  <span>“All-play” = your record if you'd played every team every week — pure scoring strength, schedule luck removed.</span>
   <span>“Finish quality” = average standing normalized for league size (100% = champion, 0% = last) — comparable across the 8/10/12/14-team eras, unlike raw average finish.</span>
   <span>“PPG vs mean” = career scoring relative to each season's league average — comparable across rule eras.</span>
   <span>“Luck” = career wins above/below the all-play deserved record.</span><span>💀 = last-place finish.</span></p>
@@ -493,7 +528,8 @@ views.manager = (mk) => {
     ${isHidden(mk) ? " · this account is hidden on Yahoo — Bennett, tell Claude who this is" : ""}</p>
 
   <div class="statrow">
-    <div class="stat"><div class="v num">${rec(c.w, c.l, c.t)}</div><div class="l">Career record (${pctf(c.pct)})</div></div>
+    <div class="stat"><div class="v num">${rec(totalRec(mk).w, totalRec(mk).l, totalRec(mk).t)}</div><div class="l">Career record incl. playoffs (${pctf(totalRec(mk).pct)})</div></div>
+    <div class="stat"><div class="v num">${poRec(mk).g ? poRec(mk).w + "-" + poRec(mk).l : "—"}</div><div class="l">Playoff record</div></div>
     <div class="stat ${c.titles ? "gold" : ""}"><div class="v num">${c.titles}</div><div class="l">Championships</div></div>
     <div class="stat"><div class="v num">${num(c.avg_finish, 1)}</div><div class="l">Average finish</div></div>
     <div class="stat"><div class="v num">${(() => { const fq = finishQuality(mk); return fq == null ? "—" : num(fq, 0) + "%"; })()}</div><div class="l">Finish quality (size-adjusted)</div></div>
@@ -508,7 +544,15 @@ views.manager = (mk) => {
     <div class="card"><div class="kicker">Scoring vs league mean</div>${sparkNorm}<p class="legend"><span>${ys[0]}–${ys[ys.length - 1]} · dashed = league average (100%)</span></p></div>
     <div class="card"><div class="kicker">Finishes over the years</div>${sparkFin}<p class="legend"><span>${ys[0]}–${ys[ys.length - 1]} · higher = better finish (#1 = champion)</span></p></div>
     <div class="card"><div class="kicker">Hardware</div>
-      <p style="font-size:15px;margin:8px 0 0">${c.titles ? "🏆 ".repeat(c.titles) : ""}${c.podiums > c.titles ? "🥈 ".repeat(c.podiums - c.titles) : ""}${c.last_places ? "💀 ".repeat(c.last_places) : ""}${!c.podiums && !c.last_places ? "<span class='dim'>A clean, trophy-less record.</span>" : ""}</p>
+      ${(() => {
+        let silv = 0, brnz = 0;
+        for (const sn of Object.values(M.seasons)) {
+          if (sn.result === "runner-up") silv++;
+          else if (sn.result === "third") brnz++;
+        }
+        const shelf = "🏆 ".repeat(c.titles) + "🥈 ".repeat(silv) + "🥉 ".repeat(brnz) + "💀 ".repeat(c.last_places);
+        return `<p style="font-size:15px;margin:8px 0 0">${shelf.trim() || "<span class='dim'>A clean, trophy-less record.</span>"}</p>`;
+      })()}
       <p class="dim small" style="margin-top:10px">${c.playoff_apps} playoff trips · ${c.crowns} weekly high scores · avg draft slot ${num(c.avg_draft_slot, 1)}</p></div>
   </div>
 
@@ -521,7 +565,7 @@ views.manager = (mk) => {
 
 views.honors = () => {
   const ys = years();
-  const add = (map, mk, y) => { if (mk) (map[mk] = map[mk] || []).push(+y); };
+  const add = (map, mk, y) => { if (mk && inc(mk)) (map[mk] = map[mk] || []).push(+y); };
   const titles = {}, regs = {}, pts = {}, paT = {};
   const sackos = [];
   for (const c of L.league.champions) add(titles, mkeyOf(c.manager), c.year);
@@ -535,9 +579,9 @@ views.honors = () => {
     const paTid = tids.reduce((m, t) => s.reg[t].pa > s.reg[m].pa ? t : m, tids[0]);
     add(paT, mgrOfTeam(y, paTid), y);
     const last = tids.find(t => s.standings[t]?.final_rank === tids.length);
-    if (last) sackos.push({y: +y, team: teamOf(y, last), mk: mgrOfTeam(y, last)});
+    if (last && inc(mgrOfTeam(y, last))) sackos.push({y: +y, team: teamOf(y, last), mk: mgrOfTeam(y, last)});
   }
-  const lowRows = Object.entries(weeklyLows())
+  const lowRows = Object.entries(weeklyLows()).filter(([lk]) => inc(lk))
     .map(([lk, n]) => ({mk: lk, lows: n, seasons: L.managers[lk].career.seasons}))
     .sort((a, b) => b.lows - a.lows).slice(0, 10);
   const champSeeds = [];
@@ -550,18 +594,19 @@ views.honors = () => {
       if (g.a === champ && g.seedA) { seed = g.seedA; break; }
       if (g.b === champ && g.seedB) { seed = g.seedB; break; }
     }
-    if (seed) champSeeds.push({y: +y, seed, team: teamOf(y, champ), mk: mgrOfTeam(y, champ)});
+    if (seed && inc(mgrOfTeam(y, champ))) champSeeds.push({y: +y, seed, team: teamOf(y, champ), mk: mgrOfTeam(y, champ)});
   }
   const deepestSeed = Math.max(...champSeeds.map(c => c.seed));
   const cinderellas = champSeeds.filter(c => c.seed === deepestSeed);
   let lucky = null, unlucky = null;
   for (const mk of Object.keys(L.managers)) {
+    if (!inc(mk)) continue;
     for (const [y, s] of Object.entries(L.managers[mk].seasons)) {
       if (!lucky || s.luck > lucky.luck) lucky = {mk, y, luck: s.luck, team: s.team};
       if (!unlucky || s.luck < unlucky.luck) unlucky = {mk, y, luck: s.luck, team: s.team};
     }
   }
-  const crownRows = Object.keys(L.managers)
+  const crownRows = Object.keys(L.managers).filter(inc)
     .map(mk => ({mk, crowns: L.managers[mk].career.crowns, seasons: L.managers[mk].career.seasons}))
     .filter(r => r.crowns > 0).sort((a, b) => b.crowns - a.crowns).slice(0, 10);
   const honorList = (map, label) => {
@@ -578,6 +623,7 @@ views.honors = () => {
   <p class="kicker">Trophy room</p>
   <h1>Honors</h1>
   <p class="sub">Everything worth bragging about — and one section nobody brags about.</p>
+  ${filterPills()}
 
   <h2>🏆 The throne</h2>
   <div class="grid cols-3">${honorList(titles, "Championships")}
@@ -592,7 +638,7 @@ views.honors = () => {
     {h: "🥈 Silver", num: 1, val: r => r.s, fmt: r => r.s || "—"},
     {h: "🥉 Bronze", num: 1, val: r => r.b, fmt: r => r.b || "—"},
     {h: "Total", num: 1, val: r => r.total, fmt: r => `<b>${r.total}</b>`},
-  ], Object.keys(L.managers).map(mk => {
+  ], Object.keys(L.managers).filter(inc).map(mk => {
     let g = 0, sv = 0, bz = 0;
     for (const sn of Object.values(L.managers[mk].seasons)) {
       if (sn.result === "champion") g++;
@@ -716,10 +762,91 @@ views.rivalry = (aRaw, bRaw) => {
   ], games, {sortCol: 0, sortDir: 1})}`;
 };
 
-views.rivalries = (q) => {
-  const cur = new URLSearchParams(q || "").get("f") === "cur";
+views.lab = () => {
+  // gather every team-season once
+  const rowsTS = [];
+  for (const mk of Object.keys(L.managers)) {
+    if (!inc(mk)) continue;
+    for (const [y, sn] of Object.entries(L.managers[mk].seasons)) {
+      if (!sn.final_rank) continue;
+      const n = Object.keys(L.seasons[y].teams).length;
+      rowsTS.push({mk, y, sn, n, fq: 100 * (n - sn.final_rank) / (n - 1)});
+    }
+  }
+
+  // ── the four fates: PF% vs PA% ──
+  const fatePts = rowsTS.filter(r => r.sn.ppg_norm && r.sn.papg_norm).map(r => ({
+    x: r.sn.ppg_norm, y: r.sn.papg_norm,
+    gold: r.sn.result === "champion", bad: r.sn.last_place,
+    t: `${mname(r.mk)} ${r.y}: scored ${r.sn.ppg_norm}%, allowed ${r.sn.papg_norm}% — finished ${r.sn.final_rank} of ${r.n}`,
+  }));
+  const quadSVG = (() => {
+    const w = 460, h = 360, padL = 34, padR = 10, padT = 16, padB = 26;
+    const span = Math.max(...fatePts.flatMap(p => [Math.abs(p.x - 100), Math.abs(p.y - 100)])) * 1.08;
+    const lo = 100 - span, hi = 100 + span;
+    const X = v => padL + (v - lo) / (hi - lo) * (w - padL - padR);
+    const Y = v => padT + (1 - (v - lo) / (hi - lo)) * (h - padT - padB);
+    const gtxt = `font-family:var(--font);fill:var(--ink-3);font-size:9.5px`;
+    const cross = `<line x1="${X(100)}" x2="${X(100)}" y1="${padT}" y2="${h - padB}" stroke="var(--line)"/>` +
+      `<line x1="${padL}" x2="${w - padR}" y1="${Y(100)}" y2="${Y(100)}" stroke="var(--line)"/>`;
+    const corner = (x, y, anchor, txt) => `<text x="${x}" y="${y}" text-anchor="${anchor}" style="${gtxt};font-weight:700">${txt}</text>`;
+    const labels = corner(w - padR - 2, padT + 10, "end", "Shootout life 🔥") +
+      corner(padL + 4, padT + 10, "start", "Cannon fodder 😵") +
+      corner(w - padR - 2, h - padB - 6, "end", "Steamrollers 🚂") +
+      corner(padL + 4, h - padB - 6, "start", "Sleepy corner 😴");
+    const ax = `<text x="${(w + padL - padR) / 2}" y="${h - 6}" text-anchor="middle" style="${gtxt}">points scored vs league mean →</text>` +
+      `<text x="10" y="${(h + padT - padB) / 2}" transform="rotate(-90 10 ${(h + padT - padB) / 2})" text-anchor="middle" style="${gtxt}">points against vs mean →</text>`;
+    const dots = fatePts.map(p => `<circle cx="${X(p.x).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="3.6" fill="${p.gold ? "var(--gold)" : p.bad ? "var(--bad)" : "var(--accent)"}" opacity="${p.gold || p.bad ? ".95" : ".4"}"><title>${esc(p.t)}</title></circle>`).join("");
+    return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;max-width:680px;height:auto;display:block">${cross}${labels}${ax}${dots}</svg>`;
+  })();
+
+  // ── boom-bust: weekly volatility vs finish ──
+  const volPts = [];
+  for (const r of rowsTS) {
+    const scores = [];
+    for (const m of L.seasons[r.y].matchups) {
+      if (m.a === r.sn.tid) scores.push(m.as);
+      else if (m.b === r.sn.tid) scores.push(m.bs);
+    }
+    if (scores.length < 6) continue;
+    const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
+    const sd = Math.sqrt(scores.reduce((a, b) => a + (b - mean) ** 2, 0) / scores.length);
+    volPts.push({x: Math.round(1000 * sd / mean) / 10, y: r.fq,
+      gold: r.sn.result === "champion",
+      t: `${mname(r.mk)} ${r.y}: ±${(100 * sd / mean).toFixed(1)}% weekly swing, finished ${r.sn.final_rank} of ${r.n}`});
+  }
+  const volR = pearson(volPts);
+  const volVerdict = Math.abs(volR) < 0.1 ? "consistency is overrated — chaos and calm finish about the same"
+    : volR < 0 ? "steady teams finish better; boom-bust is a tax" : "the chaos agents actually finish better";
+
+  // ── scoring through the eras ──
+  const eraPts = years().map(y => ({t: `${y}: avg ${num(L.seasons[y].season_mean_score)} · ${esc(L.seasons[y].settings.ppr ?? "?")} PPR`, v: L.seasons[y].season_mean_score}));
+  const pprChips = years().map(y => `<span class="chip plain">${y}: ${esc(L.seasons[y].settings.ppr ?? "?")} PPR · ${esc((L.seasons[y].settings.roster || "").split(",").length || "?")} slots</span>`).join(" ");
+
+  return `
+  <p class="kicker">The lab</p>
+  <h1>Charts & experiments</h1>
+  <p class="sub">Every dot is one team's season. Hover anything for the who and when. Gold = championship season, red = last place.</p>
+
+  <h2>The four fates</h2>
+  <p class="sub">Offense (how much you scored vs the league mean) against incoming fire (how much was scored on you). Which quadrant wins titles — and which one just suffers?</p>
+  <div class="card" style="max-width:720px">${quadSVG}</div>
+
+  <h2>Boom-bust vs steady</h2>
+  <p class="sub">Weekly scoring volatility (as % of your own average) against final finish. r = ${volR.toFixed(2)} — ${volVerdict}.</p>
+  <div class="card" style="max-width:680px">${scatter(volPts)}
+  <p class="legend"><span>x = weekly swing (higher = boom-bust)</span><span>y = finish quality (100% = champion)</span></p></div>
+
+  <h2>Scoring through the eras</h2>
+  <p class="sub">League-wide average weekly score by season — rule changes leave fingerprints.</p>
+  <div class="card" style="max-width:720px">${spark(eraPts, {w: 640, h: 120, fmt: v => Math.round(v)})}
+  <p class="legend"><span>${years()[0]}–${years()[years().length - 1]}</span><span>hover dots for each season's average and reception scoring</span></p>
+  <p style="margin-top:10px">${pprChips}</p></div>`;
+};
+
+views.rivalries = () => {
   const mks = Object.keys(L.managers)
-    .filter(mk => !cur || isCurrent(mk))
+    .filter(inc)
     .sort((a, b) => L.managers[b].career.seasons - L.managers[a].career.seasons);
   const cell = (a, b) => {
     if (a === b) return `<td class="cell me"></td>`;
@@ -743,10 +870,7 @@ views.rivalries = (q) => {
   <p class="kicker">Head-to-head</p>
   <h1>Rivalries</h1>
   <p class="sub">Row vs column, all-time (playoffs included). Green means the row manager owns the matchup.</p>
-  <div class="pill-tabs">
-    <button class="${cur ? "" : "on"}" onclick="location.hash='#/rivalries'">All-time</button>
-    <button class="${cur ? "on" : ""}" onclick="location.hash='#/rivalries?f=cur'">Current members</button>
-  </div>
+  ${filterPills()}
   <div class="tablewrap"><table class="matrix">
     <thead><tr><th></th>${mks.map(m => `<th title="${esc(mname(m))}">${esc(mdisp(m).slice(0, 7))}</th>`).join("")}</tr></thead>
     <tbody>${mks.map(a => `<tr><td>${mlink(a)}</td>${mks.map(b => cell(a, b)).join("")}</tr>`).join("")}</tbody>
@@ -814,7 +938,7 @@ views.draft = (q) => {
   const y = params.get("y") || lastSeason();
   const s = L.seasons[y];
   const opts = [...years()].reverse().map(v => `<option value="${v}" ${v === y ? "selected" : ""}>${v}</option>`).join("");
-  const slotRows = Object.keys(L.managers)
+  const slotRows = Object.keys(L.managers).filter(inc)
     .map(mk => ({mk, slots: years().map(yy => L.managers[mk].seasons[yy]?.draft_slot ?? null), avg: L.managers[mk].career.avg_draft_slot}))
     .filter(r => r.avg != null);
 
