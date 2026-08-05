@@ -471,6 +471,20 @@ views.honors = () => {
   const lowRows = Object.entries(weeklyLows())
     .map(([lk, n]) => ({mk: lk, lows: n, seasons: L.managers[lk].career.seasons}))
     .sort((a, b) => b.lows - a.lows).slice(0, 10);
+  const champSeeds = [];
+  for (const y of ys) {
+    const pod = L.seasons[y].playoffs.podium;
+    const champ = pod && pod[0];
+    if (!champ) continue;
+    let seed = null;
+    for (const g of L.seasons[y].playoffs.games) {
+      if (g.a === champ && g.seedA) { seed = g.seedA; break; }
+      if (g.b === champ && g.seedB) { seed = g.seedB; break; }
+    }
+    if (seed) champSeeds.push({y: +y, seed, team: teamOf(y, champ), mk: mgrOfTeam(y, champ)});
+  }
+  const deepestSeed = Math.max(...champSeeds.map(c => c.seed));
+  const cinderellas = champSeeds.filter(c => c.seed === deepestSeed);
   let lucky = null, unlucky = null;
   for (const mk of Object.keys(L.managers)) {
     for (const [y, s] of Object.entries(L.managers[mk].seasons)) {
@@ -502,6 +516,23 @@ views.honors = () => {
     ${honorList(pts, "Points titles (most PF)")}
     ${honorList(paT, "Most points against (human shield award)")}</div>
 
+  <h2>🥇 Medal table <span class="dim small">Olympic rules: sorted by gold, then silver, then bronze</span></h2>
+  ${table([
+    {h: "Manager", val: r => mname(r.mk), fmt: r => mlink(r.mk)},
+    {h: "🥇 Gold", num: 1, val: r => r.g, fmt: r => r.g || "—"},
+    {h: "🥈 Silver", num: 1, val: r => r.s, fmt: r => r.s || "—"},
+    {h: "🥉 Bronze", num: 1, val: r => r.b, fmt: r => r.b || "—"},
+    {h: "Total", num: 1, val: r => r.total, fmt: r => `<b>${r.total}</b>`},
+  ], Object.keys(L.managers).map(mk => {
+    let g = 0, sv = 0, bz = 0;
+    for (const sn of Object.values(L.managers[mk].seasons)) {
+      if (sn.result === "champion") g++;
+      else if (sn.result === "runner-up") sv++;
+      else if (sn.result === "third") bz++;
+    }
+    return {mk, g, s: sv, b: bz, total: g + sv + bz};
+  }).filter(m => m.total > 0).sort((a, b2) => b2.g - a.g || b2.s - a.s || b2.b - a.b))}
+
   <h2>✦ Weekly high scores, career</h2>
   ${table([
     {h: "Manager", val: r => mname(r.mk), fmt: r => mlink(r.mk)},
@@ -526,6 +557,9 @@ views.honors = () => {
     <div class="card"><div class="kicker">Most robbed season ever</div>
       <h3>${mdisp(unlucky.mk)} ${plus(unlucky.luck)}</h3>
       <p class="dim small">${esc(unlucky.team)}, <a href="#/season/${unlucky.y}">${unlucky.y}</a> — the schedule owes this team an apology.</p></div>
+    <div class="card"><div class="kicker">Lowest seed to win it all</div>
+      <h3>#${deepestSeed} seed — ${cinderellas.map(c => esc(c.team)).join(" & ")}</h3>
+      <p class="dim small">${cinderellas.map(c => `<a href="#/season/${c.y}">${c.y}</a> (${mdisp(c.mk)})`).join(" · ")} — snuck into the playoffs, left with the trophy.</p></div>
   </div>
 
   <h2>💀 The Sacko Shrine <span class="dim small">last place, immortalized</span></h2>
