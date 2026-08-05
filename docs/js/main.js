@@ -274,7 +274,7 @@ views.seasons = () => `
       <h3 style="margin:6px 0 2px">🏆 ${esc(pod[0] ? teamOf(y, pod[0]) : "?")}</h3>
       <p class="dim small" style="margin:2px 0 8px">${pod[0] ? mdisp(mgrOfTeam(y, pod[0])) : ""}</p>
       <span class="chip plain">${Object.keys(s.teams).length} teams</span>
-      <span class="chip plain">${esc(s.settings.ppr ?? "?")} PPR</span>
+      <span class="chip plain">${esc(pprFmt(s.settings.ppr))} PPR</span>
     </a>`;
   }).join("")}
   </div>`;
@@ -332,7 +332,7 @@ views.season = (y) => {
   <a class="backlink" href="#/seasons">← All seasons</a>
   <p class="kicker">${y} · ${esc(st.league_name || "")}</p>
   <h1>${y} Season</h1>
-  <p class="sub">${esc(st.scoring_type || "")} · ${esc(st.ppr ?? "?")} pt receptions · ${Object.keys(s.teams).length} teams ·
+  <p class="sub">${esc(st.scoring_type || "")} · ${esc(pprFmt(st.ppr))} pt receptions · ${Object.keys(s.teams).length} teams ·
     ${st.playoff_teams ?? "?"}-team playoffs from week ${st.playoff_start ?? "?"} · league weekly average ${num(s.season_mean_score)}</p>
 
   <div class="statrow">
@@ -396,6 +396,11 @@ const weeklyLows = () => {
     }
   }
   return _lows;
+};
+
+const pprFmt = v => {
+  const n = parseFloat(v);
+  return isNaN(n) ? (v || "?") : String(n);
 };
 
 const poRec = mk => {
@@ -821,8 +826,8 @@ views.lab = () => {
     : volR < 0 ? "steady teams finish better; boom-bust is a tax" : "the chaos agents actually finish better";
 
   // ── scoring through the eras ──
-  const eraPts = years().map(y => ({t: `${y}: avg ${num(L.seasons[y].season_mean_score)} · ${esc(L.seasons[y].settings.ppr ?? "?")} PPR`, v: L.seasons[y].season_mean_score}));
-  const pprChips = years().map(y => `<span class="chip plain">${y}: ${esc(L.seasons[y].settings.ppr ?? "?")} PPR · ${esc((L.seasons[y].settings.roster || "").split(",").length || "?")} slots</span>`).join(" ");
+  const eraPts = years().map(y => ({t: `${y}: avg ${num(L.seasons[y].season_mean_score)} · ${esc(pprFmt(L.seasons[y].settings.ppr))} PPR`, v: L.seasons[y].season_mean_score}));
+  const pprChips = years().map(y => `<span class="chip plain">${y}: ${esc(pprFmt(L.seasons[y].settings.ppr))} PPR · ${esc((L.seasons[y].settings.roster || "").split(",").length || "?")} slots</span>`).join(" ");
 
   return `
   <p class="kicker">The lab</p>
