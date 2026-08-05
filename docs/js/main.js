@@ -217,6 +217,14 @@ views.home = () => {
       <h3 class="num">${num(lo[0].score)} · ${num(lo[1].score)}</h3>
       <p class="dim small">${line(lo[0])} and ${line(lo[1])}. Scoring the weekly low is a lifestyle in this league.</p></a>`;
     })()}
+    ${(() => {
+      const lowsAll = Object.entries(weeklyLows()).map(([lk, n]) => ({lk, n})).sort((a, b) => b.n - a.n);
+      if (!lowsAll.length) return "";
+      const [king, ...rest] = lowsAll;
+      return `<a class="card" href="#/honors"><div class="kicker">Basement royalty · most weekly lows</div>
+      <h3>${mdisp(king.lk)} — ${king.n}</h3>
+      <p class="dim small">Career count of scoring the week's worst total. Chasing the crown: ${rest.slice(0, 2).map(r => `${mdisp(r.lk)} (${r.n})`).join(", ")}. Full table in Honors.</p></a>`;
+    })()}
     <a class="card" href="#/records"><div class="kicker">Closest game ever</div>
       <h3>${num(Math.abs(close.margin))} points</h3>
       <p class="dim small">${esc(close.team)} ${num(close.score)} — ${num(close.opp_score)} ${esc(close.opp)}, ${close.year} week ${close.week}.</p></a>
