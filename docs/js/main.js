@@ -433,9 +433,10 @@ views.managers = () => {
   const cols = [
     {h: "Manager", val: r => r.name, fmt: r => mlink(r.mk)},
     {h: "Szns", num: 1, val: r => r.seasons},
-    {h: "Record", num: 1, val: r => r.tpct, fmt: r => `<span class="num">${rec(r.tw, r.tl, r.tt)}</span>`},
+    {h: "Reg season", num: 1, val: r => r.pct, fmt: r => `<span class="num">${rec(r.w, r.l, r.t)}</span>`},
+    {h: "Playoffs", num: 1, val: r => (r.pow + r.pol) ? r.pow / (r.pow + r.pol) : -1, fmt: r => (r.pow + r.pol) ? `<span class="num">${r.pow}-${r.pol}</span>` : "—"},
+    {h: "Overall", num: 1, val: r => r.tpct, fmt: r => `<span class="num"><b>${rec(r.tw, r.tl, r.tt)}</b></span>`},
     {h: "Pct", num: 1, val: r => r.tpct, fmt: r => pctf(r.tpct)},
-    {h: "Playoff rec", num: 1, val: r => (r.pow + r.pol) ? r.pow / (r.pow + r.pol) : -1, fmt: r => (r.pow + r.pol) ? `<span class="num">${r.pow}-${r.pol}</span>` : "—"},
     {h: "All-play", num: 1, val: r => r.apw / Math.max(r.apw + r.apl, 1), fmt: r => `<span class="num">${r.apw}-${r.apl}</span> <span class="dim small">${pctf(r.apw / Math.max(r.apw + r.apl, 1))}</span>`},
     {h: "Titles", num: 1, val: r => r.titles, fmt: r => r.titles ? "🏆".repeat(r.titles) : "—"},
     {h: "Podiums", num: 1, val: r => r.podiums},
@@ -454,8 +455,8 @@ views.managers = () => {
   <h1>Managers</h1>
   <p class="sub">Career numbers across every season and league name. Click any column to re-sort; click a manager for the full story.</p>
   ${filterPills()}
-  <div>${table(cols, rows, {sortCol: 3, sortDir: -1, rowHref: r => `#/manager/${encodeURIComponent(r.mk)}`})}</div>
-  <p class="legend"><span>“Record” includes playoff games; “Playoff rec” is postseason games only (placement games included).</span>
+  <div>${table(cols, rows, {sortCol: 5, sortDir: -1, rowHref: r => `#/manager/${encodeURIComponent(r.mk)}`})}</div>
+  <p class="legend"><span>“Overall” = regular season + playoffs combined (placement games included); “Pct” is the overall winning percentage.</span>
   <span>“All-play” = your record if you'd played every team every week — pure scoring strength, schedule luck removed.</span>
   <span>“Finish quality” = average standing normalized for league size (100% = champion, 0% = last) — comparable across the 8/10/12/14-team eras, unlike raw average finish.</span>
   <span>“PPG vs mean” = career scoring relative to each season's league average — comparable across rule eras.</span>
