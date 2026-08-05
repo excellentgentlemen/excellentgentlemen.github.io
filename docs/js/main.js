@@ -551,7 +551,7 @@ views.manager = (mk) => {
 
 views.honors = () => {
   const ys = years();
-  const add = (map, mk, y) => { if (mk) (map[mk] = map[mk] || []).push(+y); };
+  const add = (map, mk, y) => { if (mk && inc(mk)) (map[mk] = map[mk] || []).push(+y); };
   const titles = {}, regs = {}, pts = {}, paT = {};
   const sackos = [];
   for (const c of L.league.champions) add(titles, mkeyOf(c.manager), c.year);
@@ -586,6 +586,7 @@ views.honors = () => {
   const cinderellas = champSeeds.filter(c => c.seed === deepestSeed);
   let lucky = null, unlucky = null;
   for (const mk of Object.keys(L.managers)) {
+    if (!inc(mk)) continue;
     for (const [y, s] of Object.entries(L.managers[mk].seasons)) {
       if (!lucky || s.luck > lucky.luck) lucky = {mk, y, luck: s.luck, team: s.team};
       if (!unlucky || s.luck < unlucky.luck) unlucky = {mk, y, luck: s.luck, team: s.team};
@@ -608,7 +609,7 @@ views.honors = () => {
   <p class="kicker">Trophy room</p>
   <h1>Honors</h1>
   <p class="sub">Everything worth bragging about — and one section nobody brags about.</p>
-  ${filterPills("filters the career tables — yearly honors always show everyone")}
+  ${filterPills("the Sacko Shrine always shows every year — everything else follows the toggle")}
 
   <h2>🏆 The throne</h2>
   <div class="grid cols-3">${honorList(titles, "Championships")}
@@ -751,6 +752,7 @@ views.lab = () => {
   // gather every team-season once
   const rowsTS = [];
   for (const mk of Object.keys(L.managers)) {
+    if (!inc(mk)) continue;
     for (const [y, sn] of Object.entries(L.managers[mk].seasons)) {
       if (!sn.final_rank) continue;
       const n = Object.keys(L.seasons[y].teams).length;
