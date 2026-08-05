@@ -94,7 +94,7 @@ def parse_standings(S, byname):
         return None
 
     c_rank, c_wlt, c_div = col("Rank"), col("W-L-T"), col("Div")
-    c_pf, c_pa = col("PF"), col("PA")
+    c_pf, c_pa, c_mv = col("PF"), col("PA"), col("Moves")
     out, division = {}, None
     for row in st["r"]:
         tid = row[0]
@@ -112,6 +112,7 @@ def parse_standings(S, byname):
             "wlt": [int(wm.group(i)) for i in (1, 2, 3)] if wm else None,
             "pf": fnum(row[c_pf]) if c_pf and c_pf < len(row) else None,
             "pa": fnum(row[c_pa]) if c_pa and c_pa < len(row) else None,
+            "moves": (lambda v: int(v) if v is not None else None)(fnum(row[c_mv])) if c_mv and c_mv < len(row) else None,
             "division": division,
         }
     return out
@@ -412,6 +413,7 @@ def build():
                 "reg_rank": r["reg_rank"],
                 "final_rank": st.get("final_rank"),
                 "division": st.get("division"),
+                "moves": st.get("moves"),
                 "result": result,
                 "last_place": st.get("final_rank") == n_teams,
                 "draft_slot": sn["draft"]["slots"].get(tid),

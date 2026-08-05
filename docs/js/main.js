@@ -73,6 +73,28 @@ function spark(points, {w = 260, h = 68, min = null, max = null, invert = false,
   return `<svg class="spark" viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px">${base}${segs.join("")}${labels}${endLabel}</svg>`;
 }
 
+function scatter(pts, {w = 380, h = 230} = {}) {
+  if (!pts.length) return "";
+  const xmax = Math.max(...pts.map(p => p.x)) * 1.06 || 1;
+  const padL = 32, padB = 24, padT = 8, padR = 10;
+  const X = v => padL + v / xmax * (w - padL - padR);
+  const Y = v => padT + (1 - v / 100) * (h - padT - padB);
+  const gtxt = `font-family:var(--font);fill:var(--ink-3);font-size:9px`;
+  const grid = [0, 50, 100].map(v => `<line x1="${padL}" x2="${w - padR}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--line)" ${v !== 0 ? 'stroke-dasharray="3 4"' : ""}/><text x="2" y="${(Y(v) + 3).toFixed(1)}" style="${gtxt}">${v}%</text>`).join("");
+  const xticks = [0, Math.round(xmax / 2), Math.round(xmax)].map(v => `<text x="${X(v).toFixed(1)}" y="${h - 8}" text-anchor="middle" style="${gtxt}">${v}</text>`).join("");
+  const dots = pts.map(p => `<circle cx="${X(p.x).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="3.4" fill="${p.gold ? "var(--gold)" : "var(--accent)"}" opacity="${p.gold ? "0.95" : "0.45"}"><title>${esc(p.t)}</title></circle>`).join("");
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;max-width:620px;height:auto;display:block">${grid}${xticks}${dots}</svg>`;
+}
+
+function pearson(pts) {
+  const n = pts.length;
+  const mx = pts.reduce((s, p) => s + p.x, 0) / n;
+  const my = pts.reduce((s, p) => s + p.y, 0) / n;
+  let cov = 0, vx = 0, vy = 0;
+  for (const p of pts) { cov += (p.x - mx) * (p.y - my); vx += (p.x - mx) ** 2; vy += (p.y - my) ** 2; }
+  return cov / Math.sqrt(vx * vy || 1);
+}
+
 // ── sortable table ─────────────────────────────────────────────────────────
 // One delegated listener on #app handles every table, so sorting keeps
 // working after re-renders (each sort replaces the table's DOM).
@@ -247,7 +269,7 @@ views.season = (y) => {
   if (!s) return `<p>Unknown season.</p>`;
   const st = s.settings;
   const pod = s.playoffs.podium;
-  const rows = Object.keys(s.teams).map(tid => ({tid, ...s.reg[tid], fin: s.standings[tid]?.final_rank, div: s.standings[tid]?.division}));
+  const rows = Object.keys(s.teams).map(tid => ({tid, ...s.reg[tid], fin: s.standings[tid]?.final_rank, div: s.standings[tid]?.division, moves: s.standings[tid]?.moves}));
   const weekOpts = s.weeks.map(w => `<option value="${w}">Week ${w}</option>`).join("");
 
   const cols = [
@@ -262,6 +284,7 @@ views.season = (y) => {
     {h: "All-play", num: 1, val: r => r.ap_w / Math.max(r.ap_w + r.ap_l, 1), fmt: r => `<span class="num">${r.ap_w}-${r.ap_l}</span>`},
     {h: "Luck", num: 1, val: r => r.luck, fmt: r => `<span class="${r.luck >= 0 ? "pos" : "neg"}">${plus(r.luck)}</span>`},
     {h: "Weekly highs", num: 1, val: r => r.crowns},
+    {h: "Moves", num: 1, val: r => r.moves, fmt: r => int(r.moves)},
   ];
   if (rows.some(r => r.div)) cols.splice(3, 0, {h: "Div", val: r => r.div || ""});
 
@@ -378,7 +401,29 @@ views.managers = (q) => {
   <div>${table(cols, rows, {sortCol: 3, sortDir: -1, rowHref: r => `#/manager/${encodeURIComponent(r.mk)}`})}</div>
   <p class="legend"><span>“Finish quality” = average standing normalized for league size (100% = champion, 0% = last) — comparable across the 8/10/12/14-team eras, unlike raw average finish.</span>
   <span>“PPG vs mean” = career scoring relative to each season's league average — comparable across rule eras.</span>
-  <span>“Luck” = career wins above/below the all-play deserved record.</span><span>💀 = last-place finish.</span></p>`;
+  <span>“Luck” = career wins above/below the all-play deserved record.</span><span>💀 = last-place finish.</span></p>
+  ${(() => {
+    const pts = [];
+    for (const mk of Object.keys(L.managers)) {
+      for (const [y, sn] of Object.entries(L.managers[mk].seasons)) {
+        if (sn.moves == null || !sn.final_rank) continue;
+        const n = Object.keys(L.seasons[y].teams).length;
+        pts.push({x: sn.moves, y: 100 * (n - sn.final_rank) / (n - 1),
+          gold: sn.result === "champion",
+          t: `${mname(mk)} ${y}: ${sn.moves} moves, finished ${sn.final_rank} of ${n}`});
+      }
+    }
+    if (!pts.length) return "";
+    const r = pearson(pts);
+    const verdict = Math.abs(r) < 0.1 ? "churning the waiver wire is basically a hobby, not a strategy"
+      : Math.abs(r) < 0.25 ? "a mild connection — activity helps a little, or good teams stay busy"
+      : r > 0 ? "the waiver-wire grinders really do finish better" : "the couch potatoes are winning, somehow";
+    return `
+  <h2>Do waiver moves buy wins?</h2>
+  <p class="sub">Every team-season since 2015: roster adds/drops vs where they finished (size-adjusted, 100% = champion). Gold dots are championship seasons. Correlation r = ${r.toFixed(2)} — ${verdict}.</p>
+  <div class="card" style="max-width:660px">${scatter(pts)}
+  <p class="legend"><span>x = moves that season</span><span>y = finish quality</span><span>${pts.length} seasons plotted · hover a dot for details</span></p></div>`;
+  })()}`;
 };
 
 views.manager = (mk) => {
@@ -401,6 +446,7 @@ views.manager = (mk) => {
     {h: "vs mean", num: 1, val: r => r.ppg_norm, fmt: r => r.ppg_norm == null ? "—" : `<span class="${r.ppg_norm >= 100 ? "pos" : "neg"}">${num(r.ppg_norm, 1)}%</span>`},
     {h: "Luck", num: 1, val: r => r.luck, fmt: r => `<span class="${r.luck >= 0 ? "pos" : "neg"}">${plus(r.luck)}</span>`},
     {h: "Draft slot", num: 1, val: r => r.draft_slot, fmt: r => int(r.draft_slot)},
+    {h: "Moves", num: 1, val: r => r.moves, fmt: r => int(r.moves)},
     {h: "Finish", num: 1, val: r => r.final_rank, fmt: r => `${int(r.final_rank)}${r.result === "champion" ? " 🏆" : r.result === "runner-up" ? " 🥈" : r.result === "third" ? " 🥉" : r.last_place ? " 💀" : ""}`},
     {h: "Result", val: r => r.result, fmt: r => ({champion: `<span class="chip gold">Champion</span>`, "runner-up": `<span class="chip">Runner-up</span>`, third: `<span class="chip">Third</span>`, "made-playoffs": `<span class="chip plain">Playoffs</span>`, missed: `<span class="chip plain">Missed</span>`}[r.result] || "—")},
   ];
