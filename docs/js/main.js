@@ -466,28 +466,7 @@ views.managers = () => {
   <span>“Finish quality” = average standing normalized for league size (100% = champion, 0% = last) — comparable across the 8/10/12/14-team eras, unlike raw average finish.</span>
   <span>“PPG vs mean” = career scoring relative to each season's league average — comparable across rule eras.</span>
   <span>“Luck” = career wins above/below the all-play deserved record.</span><span>💀 = last-place finish.</span></p>
-  ${(() => {
-    const pts = [];
-    for (const mk of Object.keys(L.managers)) {
-      for (const [y, sn] of Object.entries(L.managers[mk].seasons)) {
-        if (sn.moves == null || !sn.final_rank) continue;
-        const n = Object.keys(L.seasons[y].teams).length;
-        pts.push({x: sn.moves, y: 100 * (n - sn.final_rank) / (n - 1),
-          gold: sn.result === "champion",
-          t: `${mname(mk)} ${y}: ${sn.moves} moves, finished ${sn.final_rank} of ${n}`});
-      }
-    }
-    if (!pts.length) return "";
-    const r = pearson(pts);
-    const verdict = Math.abs(r) < 0.1 ? "churning the waiver wire is basically a hobby, not a strategy"
-      : Math.abs(r) < 0.25 ? "a mild connection — activity helps a little, or good teams stay busy"
-      : r > 0 ? "the waiver-wire grinders really do finish better" : "the couch potatoes are winning, somehow";
-    return `
-  <h2>Do waiver moves buy wins?</h2>
-  <p class="sub">Every team-season since 2015: roster adds/drops vs where they finished (size-adjusted, 100% = champion). Gold dots are championship seasons. Correlation r = ${r.toFixed(2)} — ${verdict}.</p>
-  <div class="card" style="max-width:660px">${scatter(pts)}
-  <p class="legend"><span>x = moves that season</span><span>y = finish quality</span><span>${pts.length} seasons plotted · hover a dot for details</span></p></div>`;
-  })()}`;
+  <p class="small" style="margin-top:14px"><a class="chip plain" href="#/lab">Waiver moves and other charts live in the Lab →</a></p>`;
 };
 
 views.manager = (mk) => {
@@ -500,7 +479,7 @@ views.manager = (mk) => {
   const maxTeams = Math.max(...years().map(y => Object.keys(L.seasons[y].teams).length));
   const sparkFin = spark(years().map(y => ({t: `${y}: finished ${M.seasons[y]?.final_rank ?? "—"}`, v: M.seasons[y]?.final_rank ?? null})), {invert: true, min: 1, max: maxTeams, fmt: v => "#" + Math.round(v)});
   const h2hRows = Object.entries(L.h2h[mk] || {}).map(([ok, v]) => ({ok, ...v}))
-    .filter(r => r.games >= 1).sort((a, b) => b.games - a.games);
+    .filter(r => r.games >= 1 && inc(r.ok)).sort((a, b) => b.games - a.games);
 
   const seasonCols = [
     {h: "Year", num: 1, val: r => r.y, fmt: r => `<a href="#/season/${r.y}">${r.y}</a>`},
@@ -566,6 +545,7 @@ views.manager = (mk) => {
   ${table(seasonCols, sRows, {sortCol: 0, sortDir: 1})}
 
   <h2>Head-to-head</h2>
+  ${filterPills()}
   ${table(h2hCols, h2hRows, {sortCol: 2, sortDir: -1})}`;
 };
 
@@ -825,6 +805,15 @@ views.lab = () => {
   const volVerdict = Math.abs(volR) < 0.1 ? "consistency is overrated — chaos and calm finish about the same"
     : volR < 0 ? "steady teams finish better; boom-bust is a tax" : "the chaos agents actually finish better";
 
+  // ── waiver moves vs finish ──
+  const movePts = rowsTS.filter(r => r.sn.moves != null).map(r => ({
+    x: r.sn.moves, y: r.fq, gold: r.sn.result === "champion",
+    t: `${mname(r.mk)} ${r.y}: ${r.sn.moves} moves, finished ${r.sn.final_rank} of ${r.n}`}));
+  const moveR = pearson(movePts);
+  const moveVerdict = Math.abs(moveR) < 0.1 ? "churning the waiver wire is basically a hobby, not a strategy"
+    : Math.abs(moveR) < 0.25 ? "a mild connection — activity helps a little, or good teams stay busy"
+    : moveR > 0 ? "the waiver-wire grinders really do finish better" : "the couch potatoes are winning, somehow";
+
   // ── scoring through the eras ──
   const eraPts = years().map(y => ({t: `${y}: avg ${num(L.seasons[y].season_mean_score)} · ${esc(pprFmt(L.seasons[y].settings.ppr))} PPR`, v: L.seasons[y].season_mean_score}));
   const pprChips = years().map(y => `<span class="chip plain">${y}: ${esc(pprFmt(L.seasons[y].settings.ppr))} PPR · ${esc((L.seasons[y].settings.roster || "").split(",").length || "?")} slots</span>`).join(" ");
@@ -842,6 +831,11 @@ views.lab = () => {
   <p class="sub">Weekly scoring volatility (as % of your own average) against final finish. r = ${volR.toFixed(2)} — ${volVerdict}.</p>
   <div class="card" style="max-width:680px">${scatter(volPts)}
   <p class="legend"><span>x = weekly swing (higher = boom-bust)</span><span>y = finish quality (100% = champion)</span></p></div>
+
+  <h2>Do waiver moves buy wins?</h2>
+  <p class="sub">Roster adds/drops each season vs where the team finished. r = ${moveR.toFixed(2)} — ${moveVerdict}.</p>
+  <div class="card" style="max-width:680px">${scatter(movePts)}
+  <p class="legend"><span>x = moves that season</span><span>y = finish quality (100% = champion)</span><span>${movePts.length} seasons plotted</span></p></div>
 
   <h2>Scoring through the eras</h2>
   <p class="sub">League-wide average weekly score by season — rule changes leave fingerprints.</p>
