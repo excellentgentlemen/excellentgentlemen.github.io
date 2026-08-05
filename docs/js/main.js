@@ -209,6 +209,14 @@ views.home = () => {
     <a class="card" href="#/manager/${encodeURIComponent(streakBest.mk)}"><div class="kicker">Streaks</div>
       <h3>${mdisp(streakBest.mk)} ${streakBest.longest_win}W · ${mdisp(streakWorst.mk)} ${streakWorst.longest_loss}L</h3>
       <p class="dim small">Longest win streak and longest skid in league history — seasons roll over, streaks don't care. Playoffs included.</p></a>
+    ${(() => {
+      const lo = L.records.low_score.slice(0, 2);
+      if (lo.length < 2) return "";
+      const line = r => `${esc(r.team)} <span class="dim">(${isHidden(mkeyOf(r.manager)) ? "?" : esc(r.manager)}, ${r.year} wk ${r.week})</span>`;
+      return `<a class="card" href="#/records"><div class="kicker">Rock bottom · two lowest weeks ever</div>
+      <h3 class="num">${num(lo[0].score)} · ${num(lo[1].score)}</h3>
+      <p class="dim small">${line(lo[0])} and ${line(lo[1])}. Scoring the weekly low is a lifestyle in this league.</p></a>`;
+    })()}
     <a class="card" href="#/records"><div class="kicker">Closest game ever</div>
       <h3>${num(Math.abs(close.margin))} points</h3>
       <p class="dim small">${esc(close.team)} ${num(close.score)} — ${num(close.opp_score)} ${esc(close.opp)}, ${close.year} week ${close.week}.</p></a>
