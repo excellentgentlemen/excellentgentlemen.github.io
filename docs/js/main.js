@@ -551,7 +551,7 @@ views.manager = (mk) => {
 
 views.honors = () => {
   const ys = years();
-  const add = (map, mk, y) => { if (mk && inc(mk)) (map[mk] = map[mk] || []).push(+y); };
+  const add = (map, mk, y) => { if (mk) (map[mk] = map[mk] || []).push(+y); };
   const titles = {}, regs = {}, pts = {}, paT = {};
   const sackos = [];
   for (const c of L.league.champions) add(titles, mkeyOf(c.manager), c.year);
@@ -565,7 +565,7 @@ views.honors = () => {
     const paTid = tids.reduce((m, t) => s.reg[t].pa > s.reg[m].pa ? t : m, tids[0]);
     add(paT, mgrOfTeam(y, paTid), y);
     const last = tids.find(t => s.standings[t]?.final_rank === tids.length);
-    if (last && inc(mgrOfTeam(y, last))) sackos.push({y: +y, team: teamOf(y, last), mk: mgrOfTeam(y, last)});
+    if (last) sackos.push({y: +y, team: teamOf(y, last), mk: mgrOfTeam(y, last)});
   }
   const lowRows = Object.entries(weeklyLows()).filter(([lk]) => inc(lk))
     .map(([lk, n]) => ({mk: lk, lows: n, seasons: L.managers[lk].career.seasons}))
@@ -586,7 +586,6 @@ views.honors = () => {
   const cinderellas = champSeeds.filter(c => c.seed === deepestSeed);
   let lucky = null, unlucky = null;
   for (const mk of Object.keys(L.managers)) {
-    if (!inc(mk)) continue;
     for (const [y, s] of Object.entries(L.managers[mk].seasons)) {
       if (!lucky || s.luck > lucky.luck) lucky = {mk, y, luck: s.luck, team: s.team};
       if (!unlucky || s.luck < unlucky.luck) unlucky = {mk, y, luck: s.luck, team: s.team};
@@ -609,7 +608,7 @@ views.honors = () => {
   <p class="kicker">Trophy room</p>
   <h1>Honors</h1>
   <p class="sub">Everything worth bragging about — and one section nobody brags about.</p>
-  ${filterPills()}
+  ${filterPills("filters the career tables — yearly honors always show everyone")}
 
   <h2>🏆 The throne</h2>
   <div class="grid cols-3">${honorList(titles, "Championships")}
@@ -752,7 +751,6 @@ views.lab = () => {
   // gather every team-season once
   const rowsTS = [];
   for (const mk of Object.keys(L.managers)) {
-    if (!inc(mk)) continue;
     for (const [y, sn] of Object.entries(L.managers[mk].seasons)) {
       if (!sn.final_rank) continue;
       const n = Object.keys(L.seasons[y].teams).length;
@@ -1015,7 +1013,7 @@ views.draft = (q) => {
   <h1>Drafts</h1>
   ${orderSection}
 
-  <h2>Round-1 slot by year</h2>
+  <h2>Round-1 slot by year${curOnly() ? ' <span class="dim small">· current members</span>' : ""}</h2>
   <div class="tablewrap"><table>
     <thead><tr><th>Manager</th>${years().map(yy => `<th class="num">${String(yy).slice(2)}</th>`).join("")}<th class="num">Avg</th></tr></thead>
     <tbody>${slotRows.map(r => `<tr><td>${mlink(r.mk)}</td>${r.slots.map(v => `<td class="num">${v ?? "·"}</td>`).join("")}<td class="num"><b>${num(r.avg, 1)}</b></td></tr>`).join("")}</tbody>
