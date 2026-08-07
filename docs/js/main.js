@@ -376,6 +376,26 @@ function weekBox(y, w) {
   }).join("")}</div><p class="legend"><span>✦ weekly high score</span></p>`;
 }
 
+let _gameRows = null;
+const gameRows = () => {
+  if (_gameRows) return _gameRows;
+  _gameRows = [];
+  for (const y of years()) {
+    const s = L.seasons[y];
+    const mean = s.season_mean_score;
+    for (const m of s.matchups) {
+      for (const [tid, sc, oppTid, os] of [[m.a, m.as, m.b, m.bs], [m.b, m.bs, m.a, m.as]]) {
+        _gameRows.push({year: +y, week: m.w, mk: mgrOfTeam(y, tid),
+          team: s.teams[tid].name, manager: s.teams[tid].manager,
+          score: sc, opp_score: os, opp: s.teams[oppTid].name,
+          norm: mean ? Math.round(1000 * sc / mean) / 10 : null,
+          won: sc > os, margin: Math.round((sc - os) * 100) / 100});
+      }
+    }
+  }
+  return _gameRows;
+};
+
 let _lows = null;
 const weeklyLows = () => {
   if (_lows) return _lows;
@@ -890,7 +910,27 @@ views.rivalries = () => {
 };
 
 views.records = () => {
-  const R = L.records;
+  const rows = gameRows().filter(r => inc(r.mk));
+  const sortBy = (arr, key, desc = true) => [...arr].sort((a, b) => desc ? key(b) - key(a) : key(a) - key(b));
+  const R = {
+    high_score: sortBy(rows, r => r.score),
+    high_score_norm: sortBy(rows.filter(r => r.norm != null), r => r.norm),
+    low_score: sortBy(rows, r => r.score, false),
+    biggest_blowout: sortBy(rows.filter(r => r.won), r => r.margin),
+    closest_game: sortBy(rows.filter(r => r.margin !== 0), r => Math.abs(r.margin), false),
+    best_loss: sortBy(rows.filter(r => !r.won), r => r.score),
+    worst_win: sortBy(rows.filter(r => r.won), r => r.score, false),
+  };
+  const combos = [];
+  for (const y of years()) {
+    const s = L.seasons[y];
+    for (const m of s.matchups) {
+      if (curOnly() && !(isCurrent(mgrOfTeam(y, m.a)) && isCurrent(mgrOfTeam(y, m.b)))) continue;
+      combos.push({year: +y, week: m.w, a: s.teams[m.a].name, b: s.teams[m.b].name,
+        as: m.as, bs: m.bs, total: Math.round((m.as + m.bs) * 100) / 100});
+    }
+  }
+  const combined_high = sortBy(combos, c => c.total).slice(0, 10);
   const gameCols = extra => [
     {h: "#", num: 1, val: (r, i) => 0, fmt: (r) => ""},
     {h: "Year", num: 1, val: r => r.year, fmt: r => `<a href="#/season/${r.year}">${r.year}</a>`},
@@ -907,6 +947,7 @@ views.records = () => {
   <p class="kicker">Record book</p>
   <h1>Records</h1>
   <p class="sub">Computed from every game ever played. “Era-adjusted” expresses a score relative to that season's league average, so 2015 numbers can argue fairly with 2025 numbers.</p>
+  ${filterPills(curOnly() ? "record lists recomputed among current members (combined games need both teams current)" : "")}
 
   ${sec("Highest single-week scores", "raw points", R.high_score, [
     {h: "Score", num: 1, val: r => r.score, fmt: r => `<b class="num">${num(r.score)}</b>`}])}
@@ -928,7 +969,7 @@ views.records = () => {
 
   <h2>Highest-scoring games <span class="dim small">combined</span></h2>
   <div class="tablewrap"><table><thead><tr><th class="num">Year</th><th class="num">Wk</th><th>Matchup</th><th class="num">Total</th></tr></thead><tbody>
-  ${R.combined_high.map(c => `<tr><td class="num"><a href="#/season/${c.year}">${c.year}</a></td><td class="num">${c.week}</td>
+  ${combined_high.map(c => `<tr><td class="num"><a href="#/season/${c.year}">${c.year}</a></td><td class="num">${c.week}</td>
     <td>${esc(c.a)} ${num(c.as)} — ${num(c.bs)} ${esc(c.b)}</td><td class="num"><b>${num(c.total)}</b></td></tr>`).join("")}
   </tbody></table></div>`;
 };
