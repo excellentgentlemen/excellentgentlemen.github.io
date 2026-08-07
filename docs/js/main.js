@@ -165,7 +165,7 @@ views.home = () => {
   const ys = years();
   const games = ys.reduce((n, y) => n + L.seasons[y].matchups.length + L.seasons[y].playoffs.games.filter(g => g.b).length, 0);
   const mgrs = Object.keys(L.managers);
-  const high = L.records.high_score[0];
+  const high = L.records.high_score.find(r => inc(mkeyOf(r.manager))) || L.records.high_score[0];
   const close = L.records.closest_game[0];
   const blow = L.records.biggest_blowout[0];
 
@@ -195,7 +195,7 @@ views.home = () => {
     <div class="stat"><div class="v num">${ys.length}</div><div class="l">Seasons</div></div>
     <div class="stat"><div class="v num">${games}</div><div class="l">Games played</div></div>
     <div class="stat"><div class="v num">${mgrs.length}</div><div class="l">Managers all-time</div></div>
-    <div class="stat gold"><div class="v num">${num(high.score)}</div><div class="l">Highest score ever — ${esc(high.team)}, ${high.year} wk ${high.week}</div></div>
+    <div class="stat gold"><div class="v num">${num(high.score)}</div><div class="l">Highest score ever${curOnly() ? " (current members)" : ""} — ${esc(high.team)}, ${high.year} wk ${high.week}</div></div>
   </div>
 
   <h2>🏆 Champions</h2>
