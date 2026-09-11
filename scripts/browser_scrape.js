@@ -120,11 +120,30 @@ window.__egl = window.__egl || {data: {}};
         if (rows) S.schedules[nm] = rows;
       }
     }
+    // Yahoo's roster-based weekly projections, read from the LIVE league page's matchup
+    // module (document.body.innerText has real line breaks; fetched docs don't).
+    try { S.projections = window.__egl.projections(); } catch (e) { S.projections = null; }
     window.__egl.data[year] = S;
     try { sessionStorage.setItem("EGL_" + year, JSON.stringify(S)); } catch (e) {}
     return "OK " + year + " base=" + base + " standings=" + (S.standings ? S.standings.r.length : 0) +
       " draft=" + S.draft.length + " teams=" + (S.teams ? S.teams.length : 0) + " sched=" + Object.keys(S.schedules).length +
       " bracket=" + (S.bracket_text ? 1 : 0);
+  };
+
+  // Parse "Team / record / live / projected vs live / projected / Team / record" blocks from the
+  // league overview's matchup module. Returns {week, teams: [{team, live, proj}]}.
+  window.__egl.projections = () => {
+    const txt = document.body.innerText || "";
+    const weekM = txt.match(/Matchups[^\n]*\n\s*Week (\d+)/);
+    // blocks look like: Team\n0-0-0\n \n \n40.12\n105.53\n\tvs\t\n6.30\n102.80\n \n \nTeam\n0-0-0
+    const re = /\n([^\n]+)\n(\d+-\d+-\d+)\s+([\d.]+)\s+([\d.]+)\s+vs\s+([\d.]+)\s+([\d.]+)\s+([^\n]+)\n(\d+-\d+-\d+)/g;
+    const teams = [];
+    let m;
+    while ((m = re.exec(txt))) {
+      teams.push({team: m[1].trim(), live: +m[3], proj: +m[4]});
+      teams.push({team: m[7].trim(), live: +m[5], proj: +m[6]});
+    }
+    return {week: weekM ? +weekM[1] : null, teams};
   };
 
   window.__egl.render = (year) => {

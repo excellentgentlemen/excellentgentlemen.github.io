@@ -261,6 +261,34 @@ views.home = () => {
   </div>`;
 };
 
+const seriesHTML = (ma, mb) => {
+  const v = L.h2h[ma]?.[mb];
+  if (!v || !v.games) return `<span class="dim small">first meeting ever</span>`;
+  const lead = v.w > v.l ? mdisp(ma) + " leads" : v.w < v.l ? mdisp(mb) + " leads" : "Series tied";
+  return `<a class="small" href="#/rivalry/${encodeURIComponent(ma)}/${encodeURIComponent(mb)}">${lead} ${Math.max(v.w, v.l)}–${Math.min(v.w, v.l)}${v.t ? "–" + v.t : ""} all-time →</a>`;
+};
+
+// One week of the current season: final results with top/lowest scorer, or the upcoming matchups
+function nowWeekHTML(y, w) {
+  const s = L.seasons[y];
+  if (s.weeks.includes(w)) {
+    const gr = gameRows().filter(r => r.year === +y && r.week === w);
+    const top = gr.reduce((m, r) => r.score > m.score ? r : m, gr[0]);
+    const low = gr.reduce((m, r) => r.score < m.score ? r : m, gr[0]);
+    return `<div class="statrow" style="margin:8px 0 12px">
+      <div class="stat gold"><div class="v num">${num(top.score)}</div><div class="l">✦ Top scorer — ${esc(top.team)} (${mdisp(top.mk)})</div></div>
+      <div class="stat" style="background:var(--bad-soft)"><div class="v num">${num(low.score)}</div><div class="l">🧊 Lowest scorer — ${esc(low.team)} (${mdisp(low.mk)}) · punishment earned</div></div>
+    </div>${weekBox(y, w)}`;
+  }
+  const games = (s.schedule || []).filter(g => g.w === w);
+  if (!games.length) return `<p class="dim">No schedule for week ${w}.</p>`;
+  return `<div class="grid cols-3">${games.map(g => {
+    const ma = mgrOfTeam(y, g.a), mb = mgrOfTeam(y, g.b);
+    return `<div class="card"><div class="kicker">${esc(teamOf(y, g.a))} <span class="dim">vs</span> ${esc(teamOf(y, g.b))}</div>
+      <p style="margin:6px 0 4px">${mlink(ma)} <span class="dim">vs</span> ${mlink(mb)}</p>${seriesHTML(ma, mb)}</div>`;
+  }).join("")}</div>`;
+}
+
 views.now = () => {
   const y = lastSeason();
   const s = L.seasons[y];
@@ -295,17 +323,22 @@ views.now = () => {
   const sched = s.schedule || [];
   const nextWeek = sched.filter(g => g.w > (latest || 0)).map(g => g.w).sort((a, b) => a - b)[0] ?? null;
   const upcoming = nextWeek ? sched.filter(g => g.w === nextWeek) : [];
-  const seriesLine = (ma, mb) => {
-    const v = L.h2h[ma]?.[mb];
-    if (!v || !v.games) return `<span class="dim small">first meeting ever</span>`;
-    const lead = v.w > v.l ? mdisp(ma) + " leads" : v.w < v.l ? mdisp(mb) + " leads" : "Series tied";
-    return `<a class="small" href="#/rivalry/${encodeURIComponent(ma)}/${encodeURIComponent(mb)}">${lead} ${Math.max(v.w, v.l)}–${Math.min(v.w, v.l)}${v.t ? "–" + v.t : ""} all-time →</a>`;
-  };
+  const allWeeks = [...new Set(sched.map(g => g.w))].sort((a, b) => a - b);
+  const weekLog = [...weeks].sort((a, b) => a - b).map(w => {
+    const gr = gameRows().filter(r => r.year === +y && r.week === w);
+    const top = gr.reduce((m, r) => r.score > m.score ? r : m, gr[0]);
+    const low = gr.reduce((m, r) => r.score < m.score ? r : m, gr[0]);
+    return {w, top, low};
+  });
+  const defaultWeek = nextWeek ?? latest ?? 1;
   // ── projection: simulate the rest of the regular season ──
   const teamsArr = Object.keys(s.teams);
   const playoffTeams = s.settings.playoff_teams || 6;
   const avgPts = played ? s.season_mean_score : (L.seasons[prevY]?.season_mean_score || 115);
+  const projMap = s.projections?.by_tid || {};
+  const haveProj = Object.keys(projMap).length >= teamsArr.length - 1;
   const prior = tid => {
+    if (haveProj && projMap[tid]) return projMap[tid];
     const fq = finishQuality(mgrOfTeam(y, tid));
     return avgPts * (1 + 0.15 * ((fq == null ? 50 : fq) - 50) / 100);
   };
@@ -324,7 +357,7 @@ views.now = () => {
   const remaining = sched.filter(g => g.w > (latest || 0));
   const SIMS = 1500;
   const tally = {};
-  teamsArr.forEach(t => tally[t] = {po: 0, top: 0, last: 0, wins: 0});
+  teamsArr.forEach(t => tally[t] = {po: 0, seed: Array(playoffTeams).fill(0), last: 0, wins: 0});
   for (let i = 0; i < SIMS; i++) {
     const w = {};
     teamsArr.forEach(t => w[t] = s.reg[t].w + 0.5 * s.reg[t].t);
@@ -332,21 +365,23 @@ views.now = () => {
       if (Math.random() < winProb(g.a, g.b)) w[g.a]++; else w[g.b]++;
     }
     const order = [...teamsArr].sort((a, b) => w[b] - w[a] || mu[b] - mu[a] || Math.random() - 0.5);
-    order.slice(0, playoffTeams).forEach(t => tally[t].po++);
-    tally[order[0]].top++;
+    order.slice(0, playoffTeams).forEach((t, k) => { tally[t].po++; tally[t].seed[k]++; });
     tally[order[order.length - 1]].last++;
     teamsArr.forEach(t => tally[t].wins += w[t]);
   }
   const projRows = teamsArr.map(tid => ({tid, mk: mgrOfTeam(y, tid),
     projW: tally[tid].wins / SIMS, po: 100 * tally[tid].po / SIMS,
-    top: 100 * tally[tid].top / SIMS, last: 100 * tally[tid].last / SIMS}));
+    seeds: tally[tid].seed.map(c => 100 * c / SIMS), last: 100 * tally[tid].last / SIMS}));
   const totalGames = sched.length ? Math.max(...sched.map(g => g.w)) : 14;
   const bar = (v, color = "var(--accent)") => `<svg width="80" height="10" viewBox="0 0 80 10" style="vertical-align:middle"><rect x="0" y="1" width="${(0.8 * v).toFixed(1)}" height="8" rx="3" fill="${color}" opacity=".8"/></svg>`;
   const projCols = [
     {h: "Team", val: r => teamOf(y, r.tid), fmt: r => `${esc(teamOf(y, r.tid))} <span class="dim small">${mdisp(r.mk)}</span>`},
     {h: "Proj. wins", num: 1, val: r => r.projW, fmt: r => `<b class="num">${r.projW.toFixed(1)}</b><span class="dim small">-${(totalGames - r.projW).toFixed(1)}</span>`},
-    {h: "Playoff odds", num: 1, val: r => r.po, fmt: r => `${bar(r.po)} <span class="num">${r.po.toFixed(0)}%</span>`},
-    {h: "#1 seed", num: 1, val: r => r.top, fmt: r => num(r.top, 0) + "%"},
+    {h: "Playoffs", num: 1, val: r => r.po, fmt: r => `${bar(r.po)} <span class="num"><b>${r.po.toFixed(0)}%</b></span>`},
+    ...Array.from({length: playoffTeams}, (_, k) => ({
+      h: `#${k + 1} seed`, num: 1, val: r => r.seeds[k],
+      fmt: r => r.seeds[k] < 0.5 ? `<span class="dim">–</span>` : `<span class="${r.seeds[k] >= 25 ? "pos" : ""}">${num(r.seeds[k], 0)}%</span>`,
+    })),
     {h: "Last place", num: 1, val: r => r.last, fmt: r => `<span class="${r.last >= 15 ? "neg" : ""}">${num(r.last, 0)}%</span>`},
   ];
 
@@ -391,24 +426,23 @@ views.now = () => {
   <h1>This Season</h1>
   <p class="sub">${n} teams · ${esc(pprFmt(s.settings.ppr))} PPR · ${s.settings.playoff_teams ?? "?"}-team playoffs from week ${s.settings.playoff_start ?? "?"}.
     ${played ? `League weekly average so far: ${num(s.season_mean_score)}.` : "Drafted and ready — first results land once week 1 wraps up Monday night."}</p>
+  <h2 class="section-head" style="margin-top:20px">Matchups <span class="spacer"></span>
+    <select id="nowWeek" class="ctl">${allWeeks.map(w => `<option value="${w}" ${w === defaultWeek ? "selected" : ""}>Week ${w}${weeks.includes(w) ? " · final" : w === nextWeek ? " · up next" : ""}</option>`).join("")}</select></h2>
+  <div id="nowWeekBox"></div>
   <div class="statrow">
     <div class="stat"><div class="v num">${played}</div><div class="l">Weeks completed</div></div>
     <div class="stat"><div class="v num">${s.matchups.length}</div><div class="l">Games played</div></div>
     ${leader ? `<div class="stat green"><div class="v">${esc(teamOf(y, leader.tid))}</div><div class="l">Current leader — ${rec(leader.w, leader.l, leader.t)}, ${mdisp(mgrOfTeam(y, leader.tid))}</div></div>` : ""}
     ${topWeek ? `<div class="stat gold"><div class="v num">${num(topWeek.score)}</div><div class="l">Highest week so far — ${esc(topWeek.team)}, wk ${topWeek.week}</div></div>` : ""}
   </div>
-  ${played ? `<h2>Week ${latest} results</h2>${weekBox(y, latest)}` : ""}
-  ${upcoming.length ? `<h2>Week ${nextWeek} matchups <span class="dim small">${played ? "up next" : "kicking things off"}</span></h2>
-  <div class="grid cols-3">${upcoming.map(g => {
-    const ma = mgrOfTeam(y, g.a), mb = mgrOfTeam(y, g.b);
-    return `<div class="card"><div class="kicker">${esc(teamOf(y, g.a))} <span class="dim">vs</span> ${esc(teamOf(y, g.b))}</div>
-      <p style="margin:6px 0 4px">${mlink(ma)} <span class="dim">vs</span> ${mlink(mb)}</p>${seriesLine(ma, mb)}</div>`;
-  }).join("")}</div>` : ""}
   <h2>${played ? "Standings so far" : "The field"} <span class="dim small">with career résumés</span></h2>
   ${table(cols, rows, {sortCol: played ? 0 : 1, sortDir: 1})}
   <p class="legend"><span>“All-play” = record if you'd played every team every week.</span><span>“Luck” = wins minus deserved wins from all-play.</span><span>“Career finish” = size-adjusted average finish (100% = champion).</span></p>
+  ${weekLog.length ? `<h2>Weekly punishment log <span class="dim small">lowest score each week</span></h2>
+  <div class="tablewrap"><table><thead><tr><th class="num">Week</th><th>🧊 Lowest scorer</th><th class="num">Pts</th><th>✦ Top scorer</th><th class="num">Pts</th></tr></thead>
+  <tbody>${weekLog.map(e => `<tr><td class="num">${e.w}</td><td>${esc(e.low.team)} <span class="dim small">${mdisp(e.low.mk)}</span></td><td class="num neg">${num(e.low.score)}</td><td>${esc(e.top.team)} <span class="dim small">${mdisp(e.top.mk)}</span></td><td class="num pos">${num(e.top.score)}</td></tr>`).join("")}</tbody></table></div>` : ""}
   <h2>Playoff odds <span class="dim small">projected</span></h2>
-  <p class="sub">${SIMS.toLocaleString()} simulated finishes of the remaining ${remaining.length} regular-season games. Team strength blends this season's scoring with the manager's career résumé — the résumé dominates until real games pile up${played ? "" : ", so right now this is purely what history expects"}. For arguments, not wagers.</p>
+  <p class="sub">${SIMS.toLocaleString()} simulated finishes of the remaining ${remaining.length} regular-season games. Team strength = ${haveProj ? `Yahoo's current roster projections (week ${s.projections.week ?? "?"})` : "each manager's career résumé"} blended with this season's actual scoring, which takes over as results accumulate. ${played >= 2 ? "" : "These firm up meaningfully once about two weeks are in the books."}</p>
   ${table(projCols, projRows, {sortCol: 2, sortDir: -1})}
   ${bumpChart || `<p class="note" style="margin-top:14px">The standings-race chart appears once two weeks are complete.</p>`}
 
@@ -1266,6 +1300,14 @@ function route() {
     if (sel && box) {
       const draw = () => box.innerHTML = weekBox(seg[1], sel.value);
       sel.value = String(Math.max(...L.seasons[seg[1]].weeks));
+      sel.addEventListener("change", draw);
+      draw();
+    }
+  }
+  if (name === "now") {
+    const sel = $("#nowWeek"), box = $("#nowWeekBox");
+    if (sel && box) {
+      const draw = () => box.innerHTML = nowWeekHTML(lastSeason(), +sel.value);
       sel.addEventListener("change", draw);
       draw();
     }

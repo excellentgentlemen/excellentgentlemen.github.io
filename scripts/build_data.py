@@ -180,6 +180,17 @@ def parse_schedule(S, byname):
     return sorted(out, key=lambda g: (g["w"], int(g["a"])))
 
 
+def parse_projections(S, byname):
+    """Yahoo's roster-based weekly projections from the live league page -> {week, by_tid}."""
+    raw = S.get("projections") or {}
+    by_tid = {}
+    for p in raw.get("teams") or []:
+        tid = byname.get(norm(p.get("team", "")))
+        if tid and p.get("proj"):
+            by_tid[tid] = float(p["proj"])
+    return {"week": raw.get("week"), "by_tid": by_tid}
+
+
 ROUND_RE = re.compile(
     r"(Quarterfinal|Semifinal|Final|\d(?:st|nd|rd|th) Place Game)"
     r"\s*(\d{1,2})\s+(.*?)(?:\s*(\d{1,4}\.\d{2})|\s*Bye)"
@@ -407,6 +418,7 @@ def build():
             "weeks": weeks,
             "in_progress": in_progress,
             "schedule": parse_schedule(S, byname),
+            "projections": parse_projections(S, byname),
         }
 
     # ---- manager registry ------------------------------------------------
