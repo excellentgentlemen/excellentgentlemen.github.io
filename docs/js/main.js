@@ -442,7 +442,8 @@ views.now = () => {
   </div>
   <h2>${played ? "Standings so far" : "The field"} <span class="dim small">with career résumés</span></h2>
   ${table(cols, rows, {sortCol: played ? 0 : 1, sortDir: 1})}
-  <p class="legend"><span>“All-play” = record if you'd played every team every week.</span><span>“Luck” = wins minus deserved wins from all-play.</span><span>“Career finish” = size-adjusted average finish (100% = champion).</span></p>
+  <p class="legend"><span>“All-play” = record if you'd played every team every week.</span><span>“Luck” = wins minus deserved wins from all-play.</span></p>
+  <p class="note" style="margin-top:10px"><b>Career finish</b> is a manager's average finishing position across every season they've played, rescaled so the 8-, 10-, 12-, and 14-team eras compare fairly: <b>100%</b> = won the title, <b>0%</b> = finished last, <b>50%</b> = dead middle of the pack. Finishing 3rd of 12 scores 82%; 3rd of 8 scores 71% — same trophy shelf, different degree of difficulty. Titles and “${prevY} finish” are raw history; this one is the long-run average. Rookies have no history yet.</p>
   ${weekLog.length ? `<h2>Weekly punishment log <span class="dim small">lowest score each week</span></h2>
   <div class="tablewrap"><table><thead><tr><th class="num">Week</th><th>🧊 Lowest scorer</th><th class="num">Pts</th><th>✦ Top scorer</th><th class="num">Pts</th></tr></thead>
   <tbody>${weekLog.map(e => `<tr><td class="num">${e.w}</td><td>${esc(e.low.team)} <span class="dim small">${mdisp(e.low.mk)}</span></td><td class="num neg">${num(e.low.score)}</td><td>${esc(e.top.team)} <span class="dim small">${mdisp(e.top.mk)}</span></td><td class="num pos">${num(e.top.score)}</td></tr>`).join("")}</tbody></table></div>` : ""}
