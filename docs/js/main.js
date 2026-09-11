@@ -391,12 +391,12 @@ views.now = () => {
     const projOrder = [...projRows].sort((a, b) => b.projW - a.projW || b.po - a.po);
     const projRank = {};
     projOrder.forEach((r, i) => projRank[r.tid] = i + 1);
-    const labels = ["proj"];
+    const labels = ["Proj"];
     const ranks = [projRank];
     const cum = {};
     teamsArr.forEach(t => cum[t] = {w: 0, pf: 0});
     for (const wk of [...weeks].sort((a, b) => a - b)) {
-      labels.push("wk " + wk);
+      labels.push("Wk " + wk);
       for (const m of s.matchups.filter(m => m.w === wk)) {
         cum[m.a].pf += m.as; cum[m.b].pf += m.bs;
         if (m.as > m.bs) cum[m.a].w++; else if (m.bs > m.as) cum[m.b].w++; else { cum[m.a].w += 0.5; cum[m.b].w += 0.5; }
@@ -404,23 +404,31 @@ views.now = () => {
       const order = [...teamsArr].sort((a, b) => cum[b].w - cum[a].w || cum[b].pf - cum[a].pf);
       const r = {}; order.forEach((t, i) => r[t] = i + 1); ranks.push(r);
     }
-    const W = 680, rowH = 22, padL = 34, padR = 190, padT = 10, H = padT + rowH * n + 24;
-    const X = i => padL + i * (W - padL - padR) / Math.max(ranks.length - 1, 1);
+    const W = 700, rowH = 24, padL = 46, padR = 200, padT = 16, padB = 34;
+    const H = padT + rowH * n + padB;
+    const plotR = W - padR;
+    const X = i => padL + i * (plotR - padL) / Math.max(ranks.length - 1, 1);
     const Y = r => padT + (r - 1) * rowH + rowH / 2;
-    const txt = "font-family:var(--font);font-size:10px;fill:var(--ink-3)";
+    const frame = `<rect x="${padL - 8}" y="${padT - 6}" width="${plotR - padL + 16}" height="${rowH * n + 12}" rx="8" fill="none" stroke="var(--ink-3)" stroke-opacity=".5"/>`;
+    const grid = Array.from({length: n}, (_, i) =>
+        `<line x1="${padL}" x2="${plotR}" y1="${Y(i + 1).toFixed(1)}" y2="${Y(i + 1).toFixed(1)}" stroke="var(--line)" stroke-dasharray="3 4"/>`).join("")
+      + ranks.map((_, k) =>
+        `<line x1="${X(k).toFixed(1)}" x2="${X(k).toFixed(1)}" y1="${padT}" y2="${(padT + rowH * n).toFixed(1)}" stroke="var(--ink-3)" stroke-opacity=".35" stroke-dasharray="2 5"/>`).join("");
+    const yl = Array.from({length: n}, (_, i) =>
+      `<text x="${padL - 14}" y="${(Y(i + 1) + 3.5).toFixed(1)}" text-anchor="end" style="font-family:var(--font);font-size:10.5px;font-weight:600;fill:var(--ink-2)">#${i + 1}</text>`).join("");
+    const xl = ranks.map((_, k) =>
+      `<text x="${X(k).toFixed(1)}" y="${H - 10}" text-anchor="middle" style="font-family:var(--font);font-size:11.5px;font-weight:650;fill:var(--ink-2)">${labels[k]}</text>`).join("");
     const lines = teamsArr.map((t, i) => {
       const color = `hsl(${Math.round(i * 360 / n)} 55% 45%)`;
       const d = ranks.map((r, k) => (k ? "L" : "M") + X(k).toFixed(1) + " " + Y(r[t]).toFixed(1)).join("");
       const last = ranks[ranks.length - 1][t];
-      return `<path d="${d}" fill="none" stroke="${color}" stroke-width="2.2" opacity=".85"/>
-        <circle cx="${X(ranks.length - 1).toFixed(1)}" cy="${Y(last).toFixed(1)}" r="3.5" fill="${color}"/>
-        <text x="${(X(ranks.length - 1) + 8).toFixed(1)}" y="${(Y(last) + 3.5).toFixed(1)}" style="font-family:var(--font);font-size:11px;fill:var(--ink)">${esc(teamOf(y, t).slice(0, 24))}</text>`;
+      const dots = ranks.map((r, k) => `<circle cx="${X(k).toFixed(1)}" cy="${Y(r[t]).toFixed(1)}" r="${k === ranks.length - 1 ? 4 : 2.6}" fill="${color}"><title>${esc(teamOf(y, t))} — ${labels[k]}: #${r[t]}</title></circle>`).join("");
+      return `<path d="${d}" fill="none" stroke="${color}" stroke-width="2.4" stroke-linejoin="round" opacity=".9"/>${dots}
+        <text x="${(X(ranks.length - 1) + 10).toFixed(1)}" y="${(Y(last) + 3.5).toFixed(1)}" style="font-family:var(--font);font-size:11px;fill:var(--ink)">${esc(teamOf(y, t).slice(0, 24))}</text>`;
     }).join("");
-    const xl = ranks.map((_, k) => `<text x="${X(k).toFixed(1)}" y="${H - 6}" text-anchor="middle" style="${txt}">${labels[k]}</text>`).join("");
-    const yl = [1, Math.ceil(n / 2), n].map(r => `<text x="4" y="${(Y(r) + 3).toFixed(1)}" style="${txt}">#${r}</text>`).join("");
     return `<h2>Standings race</h2>
-    <p class="sub">Starts from the preseason projected order, then where every team actually sat after each completed week (wins, then points).</p>
-    <div class="card" style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;min-width:520px;height:auto;display:block">${yl}${xl}${lines}</svg></div>`;
+    <p class="sub">Starts from the preseason projected order, then where every team actually sat after each completed week (wins, then points). Hover a dot for the exact spot.</p>
+    <div class="card" style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;min-width:540px;height:auto;display:block">${frame}${grid}${yl}${xl}${lines}</svg></div>`;
   })();
 
   const leader = played ? rows.find(r => r.reg_rank === 1) : null;
