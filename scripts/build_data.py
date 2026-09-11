@@ -157,6 +157,29 @@ def parse_matchups(S, byname):
             for (w, a, b), s in sorted(seen.items())]
 
 
+def parse_schedule(S, byname):
+    """Every scheduled matchup (played or not) as {w, a, b}, deduped."""
+    seen, out = set(), []
+    for tname, rows in (S.get("schedules") or {}).items():
+        t = byname.get(norm(tname))
+        if not t:
+            continue
+        for r in rows:
+            if len(r) < 2:
+                continue
+            wm = re.match(r"(\d+)", str(r[0]).strip())
+            o = byname.get(norm(r[1]))
+            if not wm or not o:
+                continue
+            a, b = sorted([t, o], key=int)
+            key = (int(wm.group(1)), a, b)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"w": key[0], "a": a, "b": b})
+    return sorted(out, key=lambda g: (g["w"], int(g["a"])))
+
+
 ROUND_RE = re.compile(
     r"(Quarterfinal|Semifinal|Final|\d(?:st|nd|rd|th) Place Game)"
     r"\s*(\d{1,2})\s+(.*?)(?:\s*(\d{1,4}\.\d{2})|\s*Bye)"
@@ -383,6 +406,7 @@ def build():
             "season_mean_score": round(season_mean, 2),
             "weeks": weeks,
             "in_progress": in_progress,
+            "schedule": parse_schedule(S, byname),
         }
 
     # ---- manager registry ------------------------------------------------

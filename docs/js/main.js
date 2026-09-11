@@ -267,11 +267,18 @@ views.now = () => {
   const weeks = s.weeks;
   const played = weeks.length;
   const n = Object.keys(s.teams).length;
-  const rows = Object.keys(s.teams).map(tid => ({tid, ...s.reg[tid], moves: s.standings[tid]?.moves}));
+  const prevY = String(+y - 1);
+  const rows = Object.keys(s.teams).map(tid => {
+    const mk = mgrOfTeam(y, tid);
+    return {tid, mk, ...s.reg[tid], moves: s.standings[tid]?.moves, div: s.standings[tid]?.division,
+      prevFin: L.managers[mk]?.seasons?.[prevY]?.final_rank ?? null,
+      titles: L.managers[mk]?.career.titles ?? 0, finq: finishQuality(mk)};
+  });
   const cols = [
     {h: "#", num: 1, val: r => r.reg_rank},
     {h: "Team", val: r => teamOf(y, r.tid), fmt: r => esc(teamOf(y, r.tid))},
-    {h: "Manager", val: r => mname(mgrOfTeam(y, r.tid)), fmt: r => mlink(mgrOfTeam(y, r.tid))},
+    {h: "Manager", val: r => mname(r.mk), fmt: r => mlink(r.mk)},
+    {h: "Div", val: r => r.div || ""},
     {h: "W-L", num: 1, val: r => r.w + 0.5 * r.t, fmt: r => `<span class="num">${rec(r.w, r.l, r.t)}</span>`},
     {h: "PF", num: 1, val: r => r.pf, fmt: r => num(r.pf)},
     {h: "PA", num: 1, val: r => r.pa, fmt: r => num(r.pa)},
@@ -280,8 +287,102 @@ views.now = () => {
     {h: "Luck", num: 1, val: r => r.luck, fmt: r => `<span class="${r.luck >= 0 ? "pos" : "neg"}">${plus(r.luck)}</span>`},
     {h: "Weekly highs", num: 1, val: r => r.crowns},
     {h: "Moves", num: 1, val: r => r.moves, fmt: r => int(r.moves)},
+    {h: `${prevY} finish`, num: 1, val: r => r.prevFin ?? 99, fmt: r => r.prevFin ? "#" + r.prevFin : `<span class="dim">new</span>`},
+    {h: "Titles", num: 1, val: r => r.titles, fmt: r => r.titles ? "🏆".repeat(r.titles) : "—"},
+    {h: "Career finish", num: 1, val: r => r.finq ?? -1, fmt: r => r.finq == null ? `<span class="dim">rookie</span>` : num(r.finq, 0) + "%"},
   ];
   const latest = played ? Math.max(...weeks) : null;
+  const sched = s.schedule || [];
+  const nextWeek = sched.filter(g => g.w > (latest || 0)).map(g => g.w).sort((a, b) => a - b)[0] ?? null;
+  const upcoming = nextWeek ? sched.filter(g => g.w === nextWeek) : [];
+  const seriesLine = (ma, mb) => {
+    const v = L.h2h[ma]?.[mb];
+    if (!v || !v.games) return `<span class="dim small">first meeting ever</span>`;
+    const lead = v.w > v.l ? mdisp(ma) + " leads" : v.w < v.l ? mdisp(mb) + " leads" : "Series tied";
+    return `<a class="small" href="#/rivalry/${encodeURIComponent(ma)}/${encodeURIComponent(mb)}">${lead} ${Math.max(v.w, v.l)}–${Math.min(v.w, v.l)}${v.t ? "–" + v.t : ""} all-time →</a>`;
+  };
+  // ── projection: simulate the rest of the regular season ──
+  const teamsArr = Object.keys(s.teams);
+  const playoffTeams = s.settings.playoff_teams || 6;
+  const avgPts = played ? s.season_mean_score : (L.seasons[prevY]?.season_mean_score || 115);
+  const prior = tid => {
+    const fq = finishQuality(mgrOfTeam(y, tid));
+    return avgPts * (1 + 0.15 * ((fq == null ? 50 : fq) - 50) / 100);
+  };
+  const mu = {};
+  teamsArr.forEach(tid => {
+    const g = s.reg[tid].w + s.reg[tid].l + s.reg[tid].t;
+    mu[tid] = (g * s.reg[tid].ppg + 4 * prior(tid)) / (g + 4);
+  });
+  const sigma = 0.22 * avgPts;
+  const erf = x => {
+    const t = 1 / (1 + 0.3275911 * Math.abs(x));
+    const v = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+    return x >= 0 ? v : -v;
+  };
+  const winProb = (a, b) => 0.5 * (1 + erf((mu[a] - mu[b]) / (sigma * Math.SQRT2) / Math.SQRT2));
+  const remaining = sched.filter(g => g.w > (latest || 0));
+  const SIMS = 1500;
+  const tally = {};
+  teamsArr.forEach(t => tally[t] = {po: 0, top: 0, last: 0, wins: 0});
+  for (let i = 0; i < SIMS; i++) {
+    const w = {};
+    teamsArr.forEach(t => w[t] = s.reg[t].w + 0.5 * s.reg[t].t);
+    for (const g of remaining) {
+      if (Math.random() < winProb(g.a, g.b)) w[g.a]++; else w[g.b]++;
+    }
+    const order = [...teamsArr].sort((a, b) => w[b] - w[a] || mu[b] - mu[a] || Math.random() - 0.5);
+    order.slice(0, playoffTeams).forEach(t => tally[t].po++);
+    tally[order[0]].top++;
+    tally[order[order.length - 1]].last++;
+    teamsArr.forEach(t => tally[t].wins += w[t]);
+  }
+  const projRows = teamsArr.map(tid => ({tid, mk: mgrOfTeam(y, tid),
+    projW: tally[tid].wins / SIMS, po: 100 * tally[tid].po / SIMS,
+    top: 100 * tally[tid].top / SIMS, last: 100 * tally[tid].last / SIMS}));
+  const totalGames = sched.length ? Math.max(...sched.map(g => g.w)) : 14;
+  const bar = (v, color = "var(--accent)") => `<svg width="80" height="10" viewBox="0 0 80 10" style="vertical-align:middle"><rect x="0" y="1" width="${(0.8 * v).toFixed(1)}" height="8" rx="3" fill="${color}" opacity=".8"/></svg>`;
+  const projCols = [
+    {h: "Team", val: r => teamOf(y, r.tid), fmt: r => `${esc(teamOf(y, r.tid))} <span class="dim small">${mdisp(r.mk)}</span>`},
+    {h: "Proj. wins", num: 1, val: r => r.projW, fmt: r => `<b class="num">${r.projW.toFixed(1)}</b><span class="dim small">-${(totalGames - r.projW).toFixed(1)}</span>`},
+    {h: "Playoff odds", num: 1, val: r => r.po, fmt: r => `${bar(r.po)} <span class="num">${r.po.toFixed(0)}%</span>`},
+    {h: "#1 seed", num: 1, val: r => r.top, fmt: r => num(r.top, 0) + "%"},
+    {h: "Last place", num: 1, val: r => r.last, fmt: r => `<span class="${r.last >= 15 ? "neg" : ""}">${num(r.last, 0)}%</span>`},
+  ];
+
+  // ── standings race (rank by week) ──
+  const bumpChart = (() => {
+    if (played < 2) return "";
+    const cum = {};
+    teamsArr.forEach(t => cum[t] = {w: 0, pf: 0});
+    const ranks = [];
+    for (const wk of [...weeks].sort((a, b) => a - b)) {
+      for (const m of s.matchups.filter(m => m.w === wk)) {
+        cum[m.a].pf += m.as; cum[m.b].pf += m.bs;
+        if (m.as > m.bs) cum[m.a].w++; else if (m.bs > m.as) cum[m.b].w++; else { cum[m.a].w += 0.5; cum[m.b].w += 0.5; }
+      }
+      const order = [...teamsArr].sort((a, b) => cum[b].w - cum[a].w || cum[b].pf - cum[a].pf);
+      const r = {}; order.forEach((t, i) => r[t] = i + 1); ranks.push(r);
+    }
+    const W = 680, rowH = 22, padL = 34, padR = 190, padT = 10, H = padT + rowH * n + 24;
+    const X = i => padL + i * (W - padL - padR) / Math.max(ranks.length - 1, 1);
+    const Y = r => padT + (r - 1) * rowH + rowH / 2;
+    const txt = "font-family:var(--font);font-size:10px;fill:var(--ink-3)";
+    const lines = teamsArr.map((t, i) => {
+      const color = `hsl(${Math.round(i * 360 / n)} 55% 45%)`;
+      const d = ranks.map((r, k) => (k ? "L" : "M") + X(k).toFixed(1) + " " + Y(r[t]).toFixed(1)).join("");
+      const last = ranks[ranks.length - 1][t];
+      return `<path d="${d}" fill="none" stroke="${color}" stroke-width="2.2" opacity=".85"/>
+        <circle cx="${X(ranks.length - 1).toFixed(1)}" cy="${Y(last).toFixed(1)}" r="3.5" fill="${color}"/>
+        <text x="${(X(ranks.length - 1) + 8).toFixed(1)}" y="${(Y(last) + 3.5).toFixed(1)}" style="font-family:var(--font);font-size:11px;fill:var(--ink)">${esc(teamOf(y, t).slice(0, 24))}</text>`;
+    }).join("");
+    const xl = ranks.map((_, k) => `<text x="${X(k).toFixed(1)}" y="${H - 6}" text-anchor="middle" style="${txt}">wk ${[...weeks].sort((a, b) => a - b)[k]}</text>`).join("");
+    const yl = [1, Math.ceil(n / 2), n].map(r => `<text x="4" y="${(Y(r) + 3).toFixed(1)}" style="${txt}">#${r}</text>`).join("");
+    return `<h2>Standings race</h2>
+    <p class="sub">Where every team sat in the standings after each week (wins, then points).</p>
+    <div class="card" style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;min-width:520px;height:auto;display:block">${yl}${xl}${lines}</svg></div>`;
+  })();
+
   const leader = played ? rows.find(r => r.reg_rank === 1) : null;
   const yearRows = played ? gameRows().filter(r => r.year === +y) : [];
   const topWeek = yearRows.length ? yearRows.reduce((m, r) => r.score > m.score ? r : m, yearRows[0]) : null;
@@ -297,9 +398,26 @@ views.now = () => {
     ${topWeek ? `<div class="stat gold"><div class="v num">${num(topWeek.score)}</div><div class="l">Highest week so far — ${esc(topWeek.team)}, wk ${topWeek.week}</div></div>` : ""}
   </div>
   ${played ? `<h2>Week ${latest} results</h2>${weekBox(y, latest)}` : ""}
-  <h2>${played ? "Standings so far" : "The field"}</h2>
+  ${upcoming.length ? `<h2>Week ${nextWeek} matchups <span class="dim small">${played ? "up next" : "kicking things off"}</span></h2>
+  <div class="grid cols-3">${upcoming.map(g => {
+    const ma = mgrOfTeam(y, g.a), mb = mgrOfTeam(y, g.b);
+    return `<div class="card"><div class="kicker">${esc(teamOf(y, g.a))} <span class="dim">vs</span> ${esc(teamOf(y, g.b))}</div>
+      <p style="margin:6px 0 4px">${mlink(ma)} <span class="dim">vs</span> ${mlink(mb)}</p>${seriesLine(ma, mb)}</div>`;
+  }).join("")}</div>` : ""}
+  <h2>${played ? "Standings so far" : "The field"} <span class="dim small">with career résumés</span></h2>
   ${table(cols, rows, {sortCol: played ? 0 : 1, sortDir: 1})}
-  <p class="legend"><span>“All-play” = record if you'd played every team every week.</span><span>“Luck” = wins minus deserved wins from all-play.</span></p>
+  <p class="legend"><span>“All-play” = record if you'd played every team every week.</span><span>“Luck” = wins minus deserved wins from all-play.</span><span>“Career finish” = size-adjusted average finish (100% = champion).</span></p>
+  <h2>Playoff odds <span class="dim small">projected</span></h2>
+  <p class="sub">${SIMS.toLocaleString()} simulated finishes of the remaining ${remaining.length} regular-season games. Team strength blends this season's scoring with the manager's career résumé — the résumé dominates until real games pile up${played ? "" : ", so right now this is purely what history expects"}. For arguments, not wagers.</p>
+  ${table(projCols, projRows, {sortCol: 2, sortDir: -1})}
+  ${bumpChart || `<p class="note" style="margin-top:14px">The standings-race chart appears once two weeks are complete.</p>`}
+
+  <h2>The ${y} draft <span class="dim small">round 1</span></h2>
+  ${(() => {
+    const r1 = s.draft.picks.filter(p => p[1] === 1);
+    return r1.length ? `<div class="tablewrap"><table><thead><tr><th class="num">Pick</th><th>Player</th><th>Team</th><th>Manager</th></tr></thead>
+      <tbody>${r1.map(p => `<tr><td class="num">${p[2]}</td><td>${esc(p[4])}</td><td>${esc(teamOf(y, p[3]))}</td><td>${mlink(mgrOfTeam(y, p[3]))}</td></tr>`).join("")}</tbody></table></div>` : `<p class="dim">No draft data.</p>`;
+  })()}
   <p class="small" style="margin-top:14px"><a class="chip plain" href="#/season/${y}">Full ${y} season page →</a> &nbsp;<a class="chip plain" href="#/draft?y=${y}">${y} draft board →</a></p>`;
 };
 
