@@ -192,7 +192,7 @@ views.home = () => {
   ${filterPills("applies to leaderboards site-wide; history stays history")}
 
   <div class="statrow">
-    <div class="stat"><div class="v num">${ys.length}</div><div class="l">Seasons</div></div>
+    <div class="stat"><div class="v num">${ys.filter(y => !L.seasons[y].in_progress).length}</div><div class="l">Seasons complete${ys.some(y => L.seasons[y].in_progress) ? " · one in progress" : ""}</div></div>
     <div class="stat"><div class="v num">${games}</div><div class="l">Games played</div></div>
     <div class="stat"><div class="v num">${mgrs.length}</div><div class="l">Managers all-time</div></div>
     <div class="stat gold"><div class="v num">${num(high.score)}</div><div class="l">Highest score ever${curOnly() ? " (current members)" : ""} — ${esc(high.team)}, ${high.year} wk ${high.week}</div></div>
@@ -261,6 +261,48 @@ views.home = () => {
   </div>`;
 };
 
+views.now = () => {
+  const y = lastSeason();
+  const s = L.seasons[y];
+  const weeks = s.weeks;
+  const played = weeks.length;
+  const n = Object.keys(s.teams).length;
+  const rows = Object.keys(s.teams).map(tid => ({tid, ...s.reg[tid], moves: s.standings[tid]?.moves}));
+  const cols = [
+    {h: "#", num: 1, val: r => r.reg_rank},
+    {h: "Team", val: r => teamOf(y, r.tid), fmt: r => esc(teamOf(y, r.tid))},
+    {h: "Manager", val: r => mname(mgrOfTeam(y, r.tid)), fmt: r => mlink(mgrOfTeam(y, r.tid))},
+    {h: "W-L", num: 1, val: r => r.w + 0.5 * r.t, fmt: r => `<span class="num">${rec(r.w, r.l, r.t)}</span>`},
+    {h: "PF", num: 1, val: r => r.pf, fmt: r => num(r.pf)},
+    {h: "PA", num: 1, val: r => r.pa, fmt: r => num(r.pa)},
+    {h: "PPG", num: 1, val: r => r.ppg, fmt: r => num(r.ppg)},
+    {h: "All-play", num: 1, val: r => r.ap_w / Math.max(r.ap_w + r.ap_l, 1), fmt: r => `<span class="num">${r.ap_w}-${r.ap_l}</span>`},
+    {h: "Luck", num: 1, val: r => r.luck, fmt: r => `<span class="${r.luck >= 0 ? "pos" : "neg"}">${plus(r.luck)}</span>`},
+    {h: "Weekly highs", num: 1, val: r => r.crowns},
+    {h: "Moves", num: 1, val: r => r.moves, fmt: r => int(r.moves)},
+  ];
+  const latest = played ? Math.max(...weeks) : null;
+  const leader = played ? rows.find(r => r.reg_rank === 1) : null;
+  const yearRows = played ? gameRows().filter(r => r.year === +y) : [];
+  const topWeek = yearRows.length ? yearRows.reduce((m, r) => r.score > m.score ? r : m, yearRows[0]) : null;
+  return `
+  <p class="kicker">${y} · ${s.in_progress ? (played ? "through week " + latest : "season underway") : "final"}</p>
+  <h1>This Season</h1>
+  <p class="sub">${n} teams · ${esc(pprFmt(s.settings.ppr))} PPR · ${s.settings.playoff_teams ?? "?"}-team playoffs from week ${s.settings.playoff_start ?? "?"}.
+    ${played ? `League weekly average so far: ${num(s.season_mean_score)}.` : "Drafted and ready — first results land once week 1 wraps up Monday night."}</p>
+  <div class="statrow">
+    <div class="stat"><div class="v num">${played}</div><div class="l">Weeks completed</div></div>
+    <div class="stat"><div class="v num">${s.matchups.length}</div><div class="l">Games played</div></div>
+    ${leader ? `<div class="stat green"><div class="v">${esc(teamOf(y, leader.tid))}</div><div class="l">Current leader — ${rec(leader.w, leader.l, leader.t)}, ${mdisp(mgrOfTeam(y, leader.tid))}</div></div>` : ""}
+    ${topWeek ? `<div class="stat gold"><div class="v num">${num(topWeek.score)}</div><div class="l">Highest week so far — ${esc(topWeek.team)}, wk ${topWeek.week}</div></div>` : ""}
+  </div>
+  ${played ? `<h2>Week ${latest} results</h2>${weekBox(y, latest)}` : ""}
+  <h2>${played ? "Standings so far" : "The field"}</h2>
+  ${table(cols, rows, {sortCol: played ? 0 : 1, sortDir: 1})}
+  <p class="legend"><span>“All-play” = record if you'd played every team every week.</span><span>“Luck” = wins minus deserved wins from all-play.</span></p>
+  <p class="small" style="margin-top:14px"><a class="chip plain" href="#/season/${y}">Full ${y} season page →</a> &nbsp;<a class="chip plain" href="#/draft?y=${y}">${y} draft board →</a></p>`;
+};
+
 views.seasons = () => `
   <p class="kicker">Archive</p>
   <h1>Seasons</h1>
@@ -271,8 +313,8 @@ views.seasons = () => `
     const name = s.settings.league_name || L.league.name;
     return `<a class="card" href="#/season/${y}">
       <div class="kicker">${y}${name !== "The Excellent Gentlemen" ? " · " + esc(name) : ""}</div>
-      <h3 style="margin:6px 0 2px">🏆 ${esc(pod[0] ? teamOf(y, pod[0]) : "?")}</h3>
-      <p class="dim small" style="margin:2px 0 8px">${pod[0] ? mdisp(mgrOfTeam(y, pod[0])) : ""}</p>
+      <h3 style="margin:6px 0 2px">${s.in_progress ? "🏈 In progress" : "🏆 " + esc(pod[0] ? teamOf(y, pod[0]) : "?")}</h3>
+      <p class="dim small" style="margin:2px 0 8px">${s.in_progress ? (s.weeks.length ? "through week " + Math.max(...s.weeks) : "drafted — awaiting week 1") : (pod[0] ? mdisp(mgrOfTeam(y, pod[0])) : "")}</p>
       <span class="chip plain">${Object.keys(s.teams).length} teams</span>
       <span class="chip plain">${esc(pprFmt(s.settings.ppr))} PPR</span>
     </a>`;
@@ -313,7 +355,7 @@ views.season = (y) => {
   const weekOpts = s.weeks.map(w => `<option value="${w}">Week ${w}</option>`).join("");
 
   const cols = [
-    {h: "Fin", num: 1, val: r => r.fin},
+    {h: s.in_progress ? "Rank" : "Fin", num: 1, val: r => r.fin},
     {h: "Team", val: r => teamOf(y, r.tid), fmt: r => `${esc(teamOf(y, r.tid))}${pod[0] === r.tid ? " 🏆" : pod[1] === r.tid ? " 🥈" : pod[2] === r.tid ? " 🥉" : ""}`},
     {h: "Manager", val: r => mname(mgrOfTeam(y, r.tid)), fmt: r => mlink(mgrOfTeam(y, r.tid))},
     {h: "W-L", num: 1, val: r => r.w + 0.5 * r.t, fmt: r => `<span class="num">${rec(r.w, r.l, r.t)}</span>`},
@@ -333,25 +375,28 @@ views.season = (y) => {
   <p class="kicker">${y} · ${esc(st.league_name || "")}</p>
   <h1>${y} Season</h1>
   <p class="sub">${esc(st.scoring_type || "")} · ${esc(pprFmt(st.ppr))} pt receptions · ${Object.keys(s.teams).length} teams ·
-    ${st.playoff_teams ?? "?"}-team playoffs from week ${st.playoff_start ?? "?"} · league weekly average ${num(s.season_mean_score)}</p>
+    ${st.playoff_teams ?? "?"}-team playoffs from week ${st.playoff_start ?? "?"}${s.weeks.length ? ` · league weekly average ${num(s.season_mean_score)}` : ""}${s.in_progress ? " · <b>season in progress</b>" : ""}</p>
 
-  <div class="statrow">
+  ${s.in_progress ? `<div class="statrow">
+    <div class="stat green"><div class="v num">${s.weeks.length}</div><div class="l">Weeks completed</div></div>
+    <div class="stat"><div class="v num">${s.matchups.length}</div><div class="l">Games played so far</div></div>
+  </div>` : `<div class="statrow">
     ${pod.map((tid, i) => tid ? `<div class="stat ${i === 0 ? "gold" : ""}">
       <div class="v">${["🏆", "🥈", "🥉"][i]} ${esc(teamOf(y, tid))}</div>
       <div class="l">${["Champion", "Runner-up", "Third place"][i]} — ${mdisp(mgrOfTeam(y, tid))}</div></div>` : "").join("")}
   </div>
 
   <h2>Playoffs</h2>
-  ${bracketHTML(y)}
+  ${bracketHTML(y)}`}
 
-  <h2>Standings</h2>
+  <h2>Standings${s.in_progress ? " so far" : ""}</h2>
   ${table(cols, rows, {sortCol: 0, sortDir: 1})}
   <p class="legend"><span>“vs mean” = points per game relative to the league average that season (100% = average).</span>
   <span>“Luck” = wins minus deserved wins from the all-play record.</span></p>
 
-  <h2 class="section-head">Weekly scores <span class="spacer"></span>
+  ${s.weeks.length ? `<h2 class="section-head">Weekly scores <span class="spacer"></span>
     <select id="wkSel" class="ctl">${weekOpts}</select></h2>
-  <div id="wkBox"></div>
+  <div id="wkBox"></div>` : `<p class="note">No completed weeks yet — scores appear here once week 1 wraps up.</p>`}
 
   <h2>Draft — round 1</h2>
   ${(() => {
@@ -511,7 +556,7 @@ views.manager = (mk) => {
     {h: "Draft slot", num: 1, val: r => r.draft_slot, fmt: r => int(r.draft_slot)},
     {h: "Moves", num: 1, val: r => r.moves, fmt: r => int(r.moves)},
     {h: "Finish", num: 1, val: r => r.final_rank, fmt: r => `${int(r.final_rank)}${r.result === "champion" ? " 🏆" : r.result === "runner-up" ? " 🥈" : r.result === "third" ? " 🥉" : r.last_place ? " 💀" : ""}`},
-    {h: "Result", val: r => r.result, fmt: r => ({champion: `<span class="chip gold">Champion</span>`, "runner-up": `<span class="chip">Runner-up</span>`, third: `<span class="chip">Third</span>`, "made-playoffs": `<span class="chip plain">Playoffs</span>`, missed: `<span class="chip plain">Missed</span>`}[r.result] || "—")},
+    {h: "Result", val: r => r.result, fmt: r => ({champion: `<span class="chip gold">Champion</span>`, "runner-up": `<span class="chip">Runner-up</span>`, third: `<span class="chip">Third</span>`, "made-playoffs": `<span class="chip plain">Playoffs</span>`, missed: `<span class="chip plain">Missed</span>`, "in-progress": `<span class="chip">In progress</span>`}[r.result] || "—")},
   ];
   const sRows = ys.map(y => ({y, ...M.seasons[y]}));
 
@@ -577,6 +622,7 @@ views.honors = () => {
   for (const c of L.league.champions) add(titles, mkeyOf(c.manager), c.year);
   for (const y of ys) {
     const s = L.seasons[y];
+    if (s.in_progress) continue;
     const tids = Object.keys(s.teams);
     const regChamp = tids.find(t => s.reg[t].reg_rank === 1);
     add(regs, mgrOfTeam(y, regChamp), y);
@@ -608,6 +654,7 @@ views.honors = () => {
   for (const mk of Object.keys(L.managers)) {
     if (!inc(mk)) continue;
     for (const [y, s] of Object.entries(L.managers[mk].seasons)) {
+      if (L.seasons[y].in_progress) continue;
       if (!lucky || s.luck > lucky.luck) lucky = {mk, y, luck: s.luck, team: s.team};
       if (!unlucky || s.luck < unlucky.luck) unlucky = {mk, y, luck: s.luck, team: s.team};
     }
@@ -835,7 +882,7 @@ views.lab = () => {
     : moveR > 0 ? "the waiver-wire grinders really do finish better" : "the couch potatoes are winning, somehow";
 
   // ── scoring through the eras ──
-  const eraPts = years().map(y => ({t: `${y}: avg ${num(L.seasons[y].season_mean_score)} · ${esc(pprFmt(L.seasons[y].settings.ppr))} PPR`, v: L.seasons[y].season_mean_score}));
+  const eraPts = years().map(y => ({t: `${y}: avg ${num(L.seasons[y].season_mean_score)} · ${esc(pprFmt(L.seasons[y].settings.ppr))} PPR`, v: L.seasons[y].season_mean_score > 0 ? L.seasons[y].season_mean_score : null}));
   const pprChips = years().map(y => `<span class="chip plain">${y}: ${esc(pprFmt(L.seasons[y].settings.ppr))} PPR · ${esc((L.seasons[y].settings.roster || "").split(",").length || "?")} slots</span>`).join(" ");
 
   return `

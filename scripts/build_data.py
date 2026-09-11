@@ -130,6 +130,8 @@ def parse_matchups(S, byname):
             if len(r) < 4:
                 continue
             wk, opp, res, score = r[0], r[1], r[2], r[3]
+            if res not in ("Win", "Loss", "Tie"):
+                continue  # unplayed or mid-week game (in-progress season)
             sm = re.match(r"([\d.]+)\s*-\s*([\d.]+)", score or "")
             wm = re.match(r"(\d+)", str(wk).strip())
             if not sm or not wm:
@@ -359,7 +361,11 @@ def build():
 
         if settings.get("league_name"):
             name_history.append({"year": int(y), "name": settings["league_name"]})
-        champ_tid = (playoffs.get("podium") or [None])[0]
+        # a season with no bracket games yet is still being played
+        in_progress = not playoffs["games"]
+        if in_progress:
+            playoffs["podium"] = []
+        champ_tid = None if in_progress else (playoffs.get("podium") or [None])[0]
         if champ_tid:
             champions.append({"year": int(y), "tid": champ_tid,
                               "team": teams[champ_tid]["name"],
@@ -376,6 +382,7 @@ def build():
             "settings": settings,
             "season_mean_score": round(season_mean, 2),
             "weeks": weeks,
+            "in_progress": in_progress,
         }
 
     # ---- manager registry ------------------------------------------------
@@ -391,7 +398,10 @@ def build():
             n_teams = len(sn["teams"])
             playoff_teams = sn["settings"].get("playoff_teams")
             made = None
-            if pod and tid == pod[0]:
+            ip = sn.get("in_progress", False)
+            if ip:
+                result = "in-progress"
+            elif pod and tid == pod[0]:
                 result = "champion"
             elif pod and len(pod) > 1 and tid == pod[1]:
                 result = "runner-up"
@@ -411,11 +421,11 @@ def build():
                 "luck": r["luck"], "crowns": r["crowns"],
                 "ap_w": r["ap_w"], "ap_l": r["ap_l"],
                 "reg_rank": r["reg_rank"],
-                "final_rank": st.get("final_rank"),
+                "final_rank": None if ip else st.get("final_rank"),
                 "division": st.get("division"),
                 "moves": st.get("moves"),
                 "result": result,
-                "last_place": st.get("final_rank") == n_teams,
+                "last_place": (not ip) and st.get("final_rank") == n_teams,
                 "draft_slot": sn["draft"]["slots"].get(tid),
             }
 
