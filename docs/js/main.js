@@ -387,11 +387,16 @@ views.now = () => {
 
   // ── standings race (rank by week) ──
   const bumpChart = (() => {
-    if (played < 2) return "";
+    // column 0 = preseason projected order (from the simulation), then one column per completed week
+    const projOrder = [...projRows].sort((a, b) => b.projW - a.projW || b.po - a.po);
+    const projRank = {};
+    projOrder.forEach((r, i) => projRank[r.tid] = i + 1);
+    const labels = ["proj"];
+    const ranks = [projRank];
     const cum = {};
     teamsArr.forEach(t => cum[t] = {w: 0, pf: 0});
-    const ranks = [];
     for (const wk of [...weeks].sort((a, b) => a - b)) {
+      labels.push("wk " + wk);
       for (const m of s.matchups.filter(m => m.w === wk)) {
         cum[m.a].pf += m.as; cum[m.b].pf += m.bs;
         if (m.as > m.bs) cum[m.a].w++; else if (m.bs > m.as) cum[m.b].w++; else { cum[m.a].w += 0.5; cum[m.b].w += 0.5; }
@@ -411,10 +416,10 @@ views.now = () => {
         <circle cx="${X(ranks.length - 1).toFixed(1)}" cy="${Y(last).toFixed(1)}" r="3.5" fill="${color}"/>
         <text x="${(X(ranks.length - 1) + 8).toFixed(1)}" y="${(Y(last) + 3.5).toFixed(1)}" style="font-family:var(--font);font-size:11px;fill:var(--ink)">${esc(teamOf(y, t).slice(0, 24))}</text>`;
     }).join("");
-    const xl = ranks.map((_, k) => `<text x="${X(k).toFixed(1)}" y="${H - 6}" text-anchor="middle" style="${txt}">wk ${[...weeks].sort((a, b) => a - b)[k]}</text>`).join("");
+    const xl = ranks.map((_, k) => `<text x="${X(k).toFixed(1)}" y="${H - 6}" text-anchor="middle" style="${txt}">${labels[k]}</text>`).join("");
     const yl = [1, Math.ceil(n / 2), n].map(r => `<text x="4" y="${(Y(r) + 3).toFixed(1)}" style="${txt}">#${r}</text>`).join("");
     return `<h2>Standings race</h2>
-    <p class="sub">Where every team sat in the standings after each week (wins, then points).</p>
+    <p class="sub">Starts from the preseason projected order, then where every team actually sat after each completed week (wins, then points).</p>
     <div class="card" style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;min-width:520px;height:auto;display:block">${yl}${xl}${lines}</svg></div>`;
   })();
 
@@ -444,7 +449,7 @@ views.now = () => {
   <h2>Playoff odds <span class="dim small">projected</span></h2>
   <p class="sub">${SIMS.toLocaleString()} simulated finishes of the remaining ${remaining.length} regular-season games. Team strength = ${haveProj ? `Yahoo's current roster projections (week ${s.projections.week ?? "?"})` : "each manager's career résumé"} blended with this season's actual scoring, which takes over as results accumulate. ${played >= 2 ? "" : "These firm up meaningfully once about two weeks are in the books."}</p>
   ${table(projCols, projRows, {sortCol: 2, sortDir: -1})}
-  ${bumpChart || `<p class="note" style="margin-top:14px">The standings-race chart appears once two weeks are complete.</p>`}
+  ${bumpChart}
 
   <h2>The ${y} draft <span class="dim small">round 1</span></h2>
   ${(() => {
