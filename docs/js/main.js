@@ -460,6 +460,31 @@ views.now = () => {
   ${table(projCols, projRows, {sortCol: 2, sortDir: -1})}
   ${bumpChart}
 
+  ${(() => {
+    const dv = s.draft_value;
+    if (!dv || !dv.rows.length) return "";
+    if (!played) return `<h2>Draft report card</h2>
+      <p class="sub">Best and worst picks of the ${y} draft, ranked by what each pick returned against what its slot deserved. Unlocks once week 1 is final — until every team has played, the board is just a list of who kicked off first.</p>`;
+    const rows = [...dv.rows].sort((a, b) => b.value - a.value);
+    const cols = flip => [
+      {h: "Pick", num: 1, val: r => r.overall, fmt: r => `<span class="num">${r.round}.${String(r.pick).padStart(2, "0")}</span> <span class="dim small">#${r.overall}</span>`},
+      {h: "Player", val: r => r.player, fmt: r => `<b>${esc(r.player)}</b>`},
+      {h: "Manager", val: r => mname(mgrOfTeam(y, r.tid)), fmt: r => mlink(mgrOfTeam(y, r.tid))},
+      {h: "Pts", num: 1, val: r => r.pts, fmt: r => num(r.pts, 1)},
+      {h: "Slot deserved", num: 1, val: r => r.expected, fmt: r => `<span class="dim">${num(r.expected, 1)}</span>`},
+      {h: "Value", num: 1, val: r => r.value, fmt: r => `<b class="${r.value >= 0 ? "pos" : "neg"}">${r.value > 0 ? "+" : ""}${num(r.value, 1)}</b>`},
+      {h: "Pts rank", num: 1, val: r => r.pts_rank, fmt: r => `<span class="dim small">${r.pts_rank} of ${dv.n}</span>`},
+    ];
+    return `<h2>Draft report card <span class="dim small">value over draft slot</span></h2>
+    <p class="sub">Every pick scored against what its slot deserved: sort all ${dv.n} drafted players by points, and the 12th-best total is what pick 12 was worth. Beat that and you drafted well — a 15th-rounder outscoring a first-rounder is the biggest steal there is.</p>
+    <h3>🟢 Ten best picks</h3>
+    ${table(cols(), rows.slice(0, 10), {sortCol: 5, sortDir: -1})}
+    <h3>🔴 Ten worst picks</h3>
+    ${table(cols(), rows.slice(-10).reverse(), {sortCol: 5, sortDir: 1})}
+    <p class="legend"><span>“Slot deserved” = points scored by the Nth-best drafted player, where N is the overall pick number.</span>
+    <span>Players dropped after the draft still count for whoever drafted them.</span></p>`;
+  })()}
+
   <h2>The ${y} draft <span class="dim small">round 1</span></h2>
   ${(() => {
     const r1 = s.draft.picks.filter(p => p[1] === 1);

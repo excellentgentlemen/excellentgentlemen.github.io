@@ -123,11 +123,12 @@ window.__egl = window.__egl || {data: {}};
     // Yahoo's roster-based weekly projections, read from the LIVE league page's matchup
     // module (document.body.innerText has real line breaks; fetched docs don't).
     try { S.projections = window.__egl.projections(); } catch (e) { S.projections = null; }
+    try { S.player_stats = await window.__egl.playerStats(base, year); } catch (e) { S.player_stats = null; }
     window.__egl.data[year] = S;
     try { sessionStorage.setItem("EGL_" + year, JSON.stringify(S)); } catch (e) {}
     return "OK " + year + " base=" + base + " standings=" + (S.standings ? S.standings.r.length : 0) +
       " draft=" + S.draft.length + " teams=" + (S.teams ? S.teams.length : 0) + " sched=" + Object.keys(S.schedules).length +
-      " bracket=" + (S.bracket_text ? 1 : 0);
+      " bracket=" + (S.bracket_text ? 1 : 0) + " players=" + (S.player_stats ? Object.keys(S.player_stats).length : 0);
   };
 
   // Parse "Team / record / live / projected vs live / projected / Team / record" blocks from the
@@ -144,6 +145,48 @@ window.__egl = window.__egl || {data: {}};
       teams.push({team: m[7].trim(), live: +m[5], proj: +m[6]});
     }
     return {week: weekM ? +weekM[1] : null, teams};
+  };
+
+
+  // Season fantasy points for every player, from the league Player List (paged).
+  // Used for draft best/worst-pick value. Offense + kickers key by Yahoo player id;
+  // team defenses have no player id, so they key as "DEF:<Name>".
+  window.__egl.playerStats = async (base, year, maxOff) => {
+    const sleep = ms => new Promise(z => setTimeout(z, ms));
+    const out = {};
+    const grab = async (pos, last) => {
+      for (let c = 0; c <= last; c += 25) {
+        const url = `${base}/players?status=ALL&pos=${pos}&stat1=S_S_${year}&sort=PR&sdir=1&count=${c}`;
+        let d;
+        try {
+          const r = await fetch(url, {credentials: "same-origin"});
+          d = new DOMParser().parseFromString(await r.text(), "text/html");
+        } catch (e) { break; }
+        const trs = d.querySelectorAll("table tbody tr");
+        if (!trs.length) break;
+        for (const tr of trs) {
+          const td = Array.from(tr.querySelectorAll("td")).map(x => x.textContent.trim().replace(/\s+/g, " "));
+          if (td.length < 9) continue;
+          const a = tr.querySelector('a[href*="/nfl/players/"]');
+          let key = null, nm = null;
+          if (a) {
+            const m = a.getAttribute("href").match(/players\/(\d+)/);
+            if (m) { key = m[1]; nm = a.textContent.trim(); }
+          } else if (pos === "DEF") {
+            nm = (td[2] || "").replace(/No new player.*$/, "").trim();
+            // skip the position-legend rows Yahoo renders in the same table
+            if (nm && !/^(Who is|Only |Any )/.test(nm)) key = "DEF:" + nm;
+          }
+          if (!key) continue;
+          out[key] = {n: nm, pts: parseFloat(td[6]) || 0, pr: parseInt(td[7]) || null};
+        }
+        await sleep(250);
+      }
+    };
+    await grab("O", maxOff || 400);
+    await grab("K", 75);
+    await grab("DEF", 75);
+    return out;
   };
 
   window.__egl.render = (year) => {

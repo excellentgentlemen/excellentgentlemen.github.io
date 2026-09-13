@@ -180,6 +180,44 @@ def parse_schedule(S, byname):
     return sorted(out, key=lambda g: (g["w"], int(g["a"])))
 
 
+def parse_draft_value(S, draft, teams):
+    """Rate every pick by what it returned relative to its draft slot.
+
+    The baseline is the draft itself: sort all drafted players by points, and the
+    Nth-best total is what the Nth pick "should" have produced. A pick's value is
+    its actual points minus that baseline, so a late-round hit scores positive and
+    an early bust scores deeply negative. Team defenses have no Yahoo player id, so
+    they match on name ("Rams (LAR - DEF)" -> "DEF:Rams").
+    """
+    stats = S.get("player_stats") or {}
+    if not stats:
+        return None
+    rows = []
+    for overall, rnd, pick, tid, player, pid in draft["picks"]:
+        key = pid if pid else "DEF:" + player.split(" (")[0].strip()
+        st = stats.get(key)
+        if st is None:
+            continue
+        rows.append({
+            "overall": overall, "round": rnd, "pick": pick, "tid": tid,
+            "player": player, "pts": round(float(st.get("pts") or 0), 2),
+        })
+    if not rows:
+        return None
+    scored = sum(1 for r in rows if r["pts"] > 0)
+    baseline = sorted((r["pts"] for r in rows), reverse=True)
+    order = sorted(rows, key=lambda r: -r["pts"])
+    for rank, r in enumerate(order, 1):
+        r["pts_rank"] = rank
+    for r in rows:
+        idx = min(r["overall"], len(baseline)) - 1
+        exp = baseline[idx]
+        r["expected"] = round(exp, 2)
+        r["value"] = round(r["pts"] - exp, 2)
+    rows.sort(key=lambda r: r["overall"])
+    return {"rows": rows, "scored": scored, "n": len(rows)}
+
+
 def parse_projections(S, byname):
     """Yahoo's roster-based weekly projections from the live league page -> {week, by_tid}."""
     raw = S.get("projections") or {}
@@ -419,6 +457,7 @@ def build():
             "in_progress": in_progress,
             "schedule": parse_schedule(S, byname),
             "projections": parse_projections(S, byname),
+            "draft_value": parse_draft_value(S, draft, teams),
         }
 
     # ---- manager registry ------------------------------------------------
