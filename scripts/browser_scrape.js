@@ -123,7 +123,17 @@ window.__egl = window.__egl || {data: {}};
     // Yahoo's roster-based weekly projections, read from the LIVE league page's matchup
     // module (document.body.innerText has real line breaks; fetched docs don't).
     try { S.projections = window.__egl.projections(); } catch (e) { S.projections = null; }
-    try { S.player_stats = await window.__egl.playerStats(base, year); } catch (e) { S.player_stats = null; }
+    try {
+      const all = await window.__egl.playerStats(base, year);
+      // keep only drafted players — that is all the draft report card needs, and it
+      // keeps the payload that has to travel out through the page text channel small
+      const want = new Set();
+      for (const rd of S.draft) for (const pk of rd.picks) {
+        want.add(pk.pid ? pk.pid : "DEF:" + pk.player.split(" (")[0].trim());
+      }
+      S.player_stats = {};
+      for (const k of want) if (all[k]) S.player_stats[k] = {pts: all[k].pts};
+    } catch (e) { S.player_stats = null; }
     window.__egl.data[year] = S;
     try { sessionStorage.setItem("EGL_" + year, JSON.stringify(S)); } catch (e) {}
     return "OK " + year + " base=" + base + " standings=" + (S.standings ? S.standings.r.length : 0) +
