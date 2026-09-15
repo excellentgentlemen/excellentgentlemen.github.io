@@ -451,7 +451,8 @@ views.now = () => {
   <h2>${played ? "Standings so far" : "The field"} <span class="dim small">with career résumés</span></h2>
   ${table(cols, rows, {sortCol: played ? 0 : 1, sortDir: 1})}
   <p class="legend"><span>“All-play” = record if you'd played every team every week.</span><span>“Luck” = wins minus deserved wins from all-play.</span></p>
-  <p class="note" style="margin-top:10px"><b>Career finish</b> is a manager's average finishing position across every season they've played, rescaled so the 8-, 10-, 12-, and 14-team eras compare fairly: <b>100%</b> = won the title, <b>0%</b> = finished last, <b>50%</b> = dead middle of the pack. Finishing 3rd of 12 scores 82%; 3rd of 8 scores 71% — same trophy shelf, different degree of difficulty. Titles and “${prevY} finish” are raw history; this one is the long-run average. Rookies have no history yet.</p>
+  <p class="note" style="margin-top:10px"><b>Career finish</b> is a manager's average finishing position across every season they've played, rescaled so the 8-, 10-, 12-, and 14-team eras compare fairly: <b>100%</b> = won the title, <b>0%</b> = finished last, <b>50%</b> = dead middle of the pack. Finishing 3rd of 12 scores 82%; 3rd of 8 scores 71% — same trophy shelf, different degree of difficulty. The Titles and “${prevY} finish” columns are single facts — how many rings, where you ended last year. Career finish is the average of every year. Rookies have no history yet.</p>
+  <p class="note" style="margin-top:8px"><b>Luck</b> compares your real record to your <b>all-play</b> record — what you'd be if you played every team every week. Post the 3rd-best score of 14 and you go 11-2 in all-play that week whether your actual opponent beat you or not. Scale that to real games and you get the wins your scores <em>deserved</em>; Luck is actual wins minus deserved wins. <b>+2.0</b> means the schedule handed you two wins your scoring didn't earn; <b>−2.0</b> means you kept drawing the week's hottest team. It's the difference between a good team and a good draw.</p>
   ${weekLog.length ? `<h2>Weekly punishment log <span class="dim small">lowest score each week</span></h2>
   <div class="tablewrap"><table><thead><tr><th class="num">Week</th><th>🧊 Lowest scorer</th><th class="num">Pts</th><th>✦ Top scorer</th><th class="num">Pts</th></tr></thead>
   <tbody>${weekLog.map(e => `<tr><td class="num">${e.w}</td><td>${esc(e.low.team)} <span class="dim small">${mdisp(e.low.mk)}</span></td><td class="num neg">${num(e.low.score)}</td><td>${esc(e.top.team)} <span class="dim small">${mdisp(e.top.mk)}</span></td><td class="num pos">${num(e.top.score)}</td></tr>`).join("")}</tbody></table></div>` : ""}
@@ -468,20 +469,22 @@ views.now = () => {
     const rows = [...dv.rows].sort((a, b) => b.value - a.value);
     const cols = flip => [
       {h: "Pick", num: 1, val: r => r.overall, fmt: r => `<span class="num">${r.round}.${String(r.pick).padStart(2, "0")}</span> <span class="dim small">#${r.overall}</span>`},
-      {h: "Player", val: r => r.player, fmt: r => `<b>${esc(r.player)}</b>`},
+      {h: "Player", val: r => r.player, fmt: r => `<b>${esc(r.player)}</b> <span class="dim small">${esc(r.pos)}</span>`},
       {h: "Manager", val: r => mname(mgrOfTeam(y, r.tid)), fmt: r => mlink(mgrOfTeam(y, r.tid))},
       {h: "Pts", num: 1, val: r => r.pts, fmt: r => num(r.pts, 1)},
-      {h: "Slot deserved", num: 1, val: r => r.expected, fmt: r => `<span class="dim">${num(r.expected, 1)}</span>`},
+      {h: "Over wire", num: 1, val: r => r.vorp, fmt: r => r.vorp > 0 ? `+${num(r.vorp, 1)}` : `<span class="dim">0.0</span>`},
+      {h: "Slot deserved", num: 1, val: r => r.expected, fmt: r => `<span class="dim">${r.expected > 0 ? "+" : ""}${num(r.expected, 1)}</span>`},
       {h: "Value", num: 1, val: r => r.value, fmt: r => `<b class="${r.value >= 0 ? "pos" : "neg"}">${r.value > 0 ? "+" : ""}${num(r.value, 1)}</b>`},
       {h: "Pts rank", num: 1, val: r => r.pts_rank, fmt: r => `<span class="dim small">${r.pts_rank} of ${dv.n}</span>`},
     ];
     return `<h2>Draft report card <span class="dim small">value over draft slot</span></h2>
-    <p class="sub">Every pick scored against what its slot deserved: sort all ${dv.n} drafted players by points, and the 12th-best total is what pick 12 was worth. Beat that and you drafted well — a 15th-rounder outscoring a first-rounder is the biggest steal there is.</p>
+    <p class="sub">Two steps, both position-fair. First, every player is measured <b>over replacement</b>: his points minus what the waiver wire offered at his position (the average of the three best undrafted players there). A kicker who scored 16 when the free ones scored 13 earned +3, not +16; a 14th-round QB isn't a steal just because QBs outscore receivers; and anyone trailing the wire is worth 0 — you'd just drop him. Then the slot bar: sort all ${dv.n} drafted players by that number, and the 12th-best is what pick 12 was worth. <b>Value</b> = over-replacement minus the slot bar. It's zero-sum, so every steal is somebody else's bust${played < 4 ? " — and this early, one big week or one injury swings it, so read it as a snapshot" : ""}.</p>
     <h3>🟢 Ten best picks</h3>
-    ${table(cols(), rows.slice(0, 10), {sortCol: 5, sortDir: -1})}
+    ${table(cols(), rows.slice(0, 10), {sortCol: 6, sortDir: -1})}
     <h3>🔴 Ten worst picks</h3>
-    ${table(cols(), rows.slice(-10).reverse(), {sortCol: 5, sortDir: 1})}
-    <p class="legend"><span>“Slot deserved” = points scored by the Nth-best drafted player, where N is the overall pick number.</span>
+    ${table(cols(), rows.slice(-10).reverse(), {sortCol: 6, sortDir: 1})}
+    <p class="legend"><span>Waiver-wire replacement level: ${["QB", "RB", "WR", "TE", "K", "DEF"].filter(p => dv.replacement && p in dv.replacement).map(p => `${p} ${num(dv.replacement[p], 1)}`).join(" · ")}.</span>
+    <span>“Over wire” = points above that replacement level (0 = no better than a free agent). “Slot deserved” = the Nth-best over-wire figure among drafted players, N = overall pick.</span>
     <span>Players dropped after the draft still count for whoever drafted them.</span></p>`;
   })()}
 

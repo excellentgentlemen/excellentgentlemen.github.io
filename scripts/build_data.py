@@ -181,17 +181,29 @@ def parse_schedule(S, byname):
 
 
 def parse_draft_value(S, draft, teams):
-    """Rate every pick by what it returned relative to its draft slot.
+    """Rate every pick by what it returned relative to its draft slot, position-adjusted.
 
-    The baseline is the draft itself: sort all drafted players by points, and the
-    Nth-best total is what the Nth pick "should" have produced. A pick's value is
-    its actual points minus that baseline, so a late-round hit scores positive and
-    an early bust scores deeply negative. Team defenses have no Yahoo player id, so
-    they match on name ("Rams (LAR - DEF)" -> "DEF:Rams").
+    Raw points would flag every late-round QB, K and DEF as a steal simply because
+    those positions score a lot and get drafted late. So each player is first
+    measured as value over replacement: points minus what the waiver wire offered
+    at the same position (average of the three best undrafted players there). A
+    kicker who scores 16 when the free ones scored 13 earned +3, not +16, and a
+    player who trails the wire is worth 0 (you would just drop him). If the
+    scrape has no waiver data, replacement falls back to the last starter-quality
+    drafted player (starting slots x teams, flex split across RB/WR/TE).
+    The slot baseline is then the draft itself sorted by that figure: the Nth-best
+    is what pick N "should" have produced. value = vorp - baseline, zero-sum across
+    the league. Team defenses have no Yahoo player id, so they match on name
+    ("Rams (LAR - DEF)" -> "DEF:Rams").
     """
     stats = S.get("player_stats") or {}
     if not stats:
         return None
+    n_teams = max(len(teams), 1)
+    starters = {"QB": 1, "RB": 2, "WR": 3, "TE": 1, "K": 1, "DEF": 1}
+    flex = {"RB": 0.4, "WR": 0.4, "TE": 0.2}
+    repl_n = {p: round(n_teams * (starters[p] + flex.get(p, 0))) for p in starters}
+
     rows = []
     for overall, rnd, pick, tid, player, pid in draft["picks"]:
         key = pid if pid else "DEF:" + player.split(" (")[0].strip()
@@ -201,21 +213,44 @@ def parse_draft_value(S, draft, teams):
         rows.append({
             "overall": overall, "round": rnd, "pick": pick, "tid": tid,
             "player": player, "pts": round(float(st.get("pts") or 0), 2),
+            "pos": st.get("pos") or "?",
         })
     if not rows:
         return None
+
+    by_pos = {}
+    for r in rows:
+        by_pos.setdefault(r["pos"], []).append(r["pts"])
+    repl = {}
+    waiver = S.get("waiver_top") or {}
+    for pos, pts in by_pos.items():
+        free = [float(w.get("pts") or 0) for w in waiver.get(pos, [])][:3]
+        if free:
+            # what the waiver wire offered: average of the three best undrafted players
+            repl[pos] = sum(free) / len(free)
+        else:
+            # fallback when the scrape had no waiver data: last starter-quality drafted player
+            pts.sort(reverse=True)
+            n = repl_n.get(pos, len(pts))
+            repl[pos] = pts[min(n, len(pts)) - 1]
+    for r in rows:
+        r["repl"] = round(repl[r["pos"]], 2)
+        # floored at zero: a player who trails the waiver wire is worth nothing extra,
+        # you would just drop him for the free one. Keeps late-round "expected" at 0
+        # instead of deeply negative, so a kicker barely beating free agency is not
+        # crowned the steal of the draft.
+        r["vorp"] = round(max(0.0, r["pts"] - repl[r["pos"]]), 2)
+
     scored = sum(1 for r in rows if r["pts"] > 0)
-    baseline = sorted((r["pts"] for r in rows), reverse=True)
-    order = sorted(rows, key=lambda r: -r["pts"])
-    for rank, r in enumerate(order, 1):
+    baseline = sorted((r["vorp"] for r in rows), reverse=True)
+    for rank, r in enumerate(sorted(rows, key=lambda r: -r["pts"]), 1):
         r["pts_rank"] = rank
     for r in rows:
-        idx = min(r["overall"], len(baseline)) - 1
-        exp = baseline[idx]
+        exp = baseline[min(r["overall"], len(baseline)) - 1]
         r["expected"] = round(exp, 2)
-        r["value"] = round(r["pts"] - exp, 2)
+        r["value"] = round(r["vorp"] - exp, 2)
     rows.sort(key=lambda r: r["overall"])
-    return {"rows": rows, "scored": scored, "n": len(rows)}
+    return {"rows": rows, "scored": scored, "n": len(rows), "replacement": {k: round(v, 2) for k, v in repl.items()}}
 
 
 def parse_projections(S, byname):

@@ -132,8 +132,16 @@ window.__egl = window.__egl || {data: {}};
         want.add(pk.pid ? pk.pid : "DEF:" + pk.player.split(" (")[0].trim());
       }
       S.player_stats = {};
-      for (const k of want) if (all[k]) S.player_stats[k] = {pts: all[k].pts};
-    } catch (e) { S.player_stats = null; }
+      for (const k of want) if (all[k]) S.player_stats[k] = {pts: all[k].pts, pos: all[k].pos};
+      // and the five best UNDRAFTED players at each position: that is replacement level —
+      // what a manager could have had for free off the waiver wire
+      S.waiver_top = {};
+      for (const [k, v] of Object.entries(all)) {
+        if (want.has(k) || !v.pos) continue;
+        (S.waiver_top[v.pos] = S.waiver_top[v.pos] || []).push({n: v.n, pts: v.pts});
+      }
+      for (const p in S.waiver_top) S.waiver_top[p] = S.waiver_top[p].sort((a, b) => b.pts - a.pts).slice(0, 5);
+    } catch (e) { S.player_stats = null; S.waiver_top = null; }
     window.__egl.data[year] = S;
     try { sessionStorage.setItem("EGL_" + year, JSON.stringify(S)); } catch (e) {}
     return "OK " + year + " base=" + base + " standings=" + (S.standings ? S.standings.r.length : 0) +
@@ -179,17 +187,19 @@ window.__egl = window.__egl || {data: {}};
           const td = Array.from(tr.querySelectorAll("td")).map(x => x.textContent.trim().replace(/\s+/g, " "));
           if (td.length < 9) continue;
           const a = tr.querySelector('a[href*="/nfl/players/"]');
-          let key = null, nm = null;
+          let key = null, nm = null, ppos = null;
           if (a) {
             const m = a.getAttribute("href").match(/players\/(\d+)/);
-            if (m) { key = m[1]; nm = a.textContent.trim(); }
+            const pm = (td[2] || "").match(/-\s*(QB|RB|WR|TE|K)\b/);
+            if (m) { key = m[1]; nm = a.textContent.trim(); ppos = pos === "K" ? "K" : (pm ? pm[1] : null); }
           } else if (pos === "DEF") {
+            ppos = "DEF";
             nm = (td[2] || "").replace(/No new player.*$/, "").trim();
             // skip the position-legend rows Yahoo renders in the same table
             if (nm && !/^(Who is|Only |Any )/.test(nm)) key = "DEF:" + nm;
           }
           if (!key) continue;
-          out[key] = {n: nm, pts: parseFloat(td[6]) || 0, pr: parseInt(td[7]) || null};
+          out[key] = {n: nm, pts: parseFloat(td[6]) || 0, pr: parseInt(td[7]) || null, pos: ppos};
         }
         await sleep(250);
       }
