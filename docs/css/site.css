@@ -193,3 +193,17 @@ select.ctl {
   .brand-text { display: none; }
   th, td { padding: 8px 9px; }
 }
+
+/* ── chart tooltips ── */
+.tipbox {
+  position: fixed; z-index: 60; pointer-events: none;
+  max-width: min(280px, 82vw); padding: 8px 11px;
+  background: var(--ink); color: var(--paper);
+  border-radius: 10px; font-size: 12.5px; line-height: 1.4; font-weight: 500;
+  box-shadow: 0 8px 24px rgb(0 0 0 / .22);
+  opacity: 0; transform: translateY(3px);
+  transition: opacity .12s ease, transform .12s ease;
+}
+.tipbox.on { opacity: 1; transform: translateY(0); }
+[data-tip] { cursor: pointer; }
+svg [data-tip].lit { stroke: var(--ink) !important; stroke-width: 1.6 !important; opacity: 1 !important; }

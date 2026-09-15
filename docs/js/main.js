@@ -4,6 +4,55 @@ let L = null; // league.json payload
 
 // ── tiny utils ─────────────────────────────────────────────────────────────
 const $ = (sel, el = document) => el.querySelector(sel);
+// ── chart tooltips ────────────────────────────────────────────────────────
+// SVG's native <title> only appears on a slow desktop hover and never on a
+// phone, so every dot carries data-tip and this one floating box shows it on
+// hover, tap, or keyboard focus.
+const TIP = (() => {
+  const box = document.createElement("div");
+  box.className = "tipbox";
+  box.setAttribute("role", "status");
+  document.addEventListener("DOMContentLoaded", () => document.body.appendChild(box));
+  if (document.body) document.body.appendChild(box);
+  let lit = null;
+  const place = (x, y) => {
+    const r = box.getBoundingClientRect(), pad = 8;
+    let l = x - r.width / 2, t = y - r.height - 14;
+    l = Math.max(pad, Math.min(l, innerWidth - r.width - pad));
+    if (t < pad) t = y + 20;
+    t = Math.max(pad, Math.min(t, innerHeight - r.height - pad));
+    box.style.left = l.toFixed(0) + "px";
+    box.style.top = t.toFixed(0) + "px";
+  };
+  const show = (el, x, y) => {
+    const txt = el.getAttribute("data-tip");
+    if (!txt) return;
+    if (lit && lit !== el) lit.classList.remove("lit");
+    lit = el; el.classList.add("lit");
+    box.textContent = txt;
+    box.classList.add("on");
+    place(x, y);
+  };
+  const hide = () => {
+    if (lit) lit.classList.remove("lit");
+    lit = null;
+    box.classList.remove("on");
+  };
+  const at = e => {
+    const el = e.target && e.target.closest ? e.target.closest("[data-tip]") : null;
+    return el;
+  };
+  document.addEventListener("pointerover", e => { const el = at(e); if (el) show(el, e.clientX, e.clientY); else if (e.pointerType !== "touch") hide(); });
+  document.addEventListener("pointerdown", e => { const el = at(e); if (el) { show(el, e.clientX, e.clientY); } else hide(); });
+  document.addEventListener("pointermove", e => { const el = at(e); if (el && el === lit) place(e.clientX, e.clientY); });
+  document.addEventListener("focusin", e => { const el = at(e); if (el) { const r = el.getBoundingClientRect(); show(el, r.left + r.width / 2, r.top); } });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") hide(); });
+  addEventListener("scroll", hide, true);
+  addEventListener("hashchange", hide);
+  addEventListener("resize", hide);
+  return {hide};
+})();
+
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const num = (v, d = 2) => v == null ? "—" : Number(v).toFixed(d);
 const int = v => v == null ? "—" : String(v);
@@ -63,7 +112,7 @@ function spark(points, {w = 260, h = 68, min = null, max = null, invert = false,
     if (p.v == null) { path = ""; return; }
     lastIdx = i;
     path += (path ? "L" : "M") + X(i).toFixed(1) + " " + Y(p.v).toFixed(1);
-    segs.push(`<circle class="dot" cx="${X(i).toFixed(1)}" cy="${Y(p.v).toFixed(1)}" r="2.6"><title>${esc(p.t)}</title></circle>`);
+    segs.push(`<circle class="dot" cx="${X(i).toFixed(1)}" cy="${Y(p.v).toFixed(1)}" r="2.6" stroke="transparent" stroke-width="14" data-tip="${esc(p.t)}"/>`);
     if (path && (i === points.length - 1 || points[i + 1].v == null)) {
       segs.unshift(`<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2"/>`);
       path = "";
@@ -96,7 +145,7 @@ function scatter(pts, {w = 380, h = 230} = {}) {
   const gtxt = `font-family:var(--font);fill:var(--ink-3);font-size:9px`;
   const grid = [0, 50, 100].map(v => `<line x1="${padL}" x2="${w - padR}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--line)" ${v !== 0 ? 'stroke-dasharray="3 4"' : ""}/><text x="2" y="${(Y(v) + 3).toFixed(1)}" style="${gtxt}">${v}%</text>`).join("");
   const xticks = [0, Math.round(xmax / 2), Math.round(xmax)].map(v => `<text x="${X(v).toFixed(1)}" y="${h - 8}" text-anchor="middle" style="${gtxt}">${v}</text>`).join("");
-  const dots = pts.map(p => `<circle cx="${X(p.x).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="3.4" fill="${p.gold ? "var(--gold)" : "var(--accent)"}" opacity="${p.gold ? "0.95" : "0.45"}"><title>${esc(p.t)}</title></circle>`).join("");
+  const dots = pts.map(p => `<circle cx="${X(p.x).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="3.4" fill="${p.gold ? "var(--gold)" : "var(--accent)"}" opacity="${p.gold ? "0.95" : "0.45"}" stroke="transparent" stroke-width="14" data-tip="${esc(p.t)}"/>`).join("");
   return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;max-width:620px;height:auto;display:block">${grid}${xticks}${dots}</svg>`;
 }
 
@@ -422,7 +471,7 @@ views.now = () => {
       const color = `hsl(${Math.round(i * 360 / n)} 55% 45%)`;
       const d = ranks.map((r, k) => (k ? "L" : "M") + X(k).toFixed(1) + " " + Y(r[t]).toFixed(1)).join("");
       const last = ranks[ranks.length - 1][t];
-      const dots = ranks.map((r, k) => `<circle cx="${X(k).toFixed(1)}" cy="${Y(r[t]).toFixed(1)}" r="${k === ranks.length - 1 ? 4 : 2.6}" fill="${color}"><title>${esc(teamOf(y, t))} — ${labels[k]}: #${r[t]}</title></circle>`).join("");
+      const dots = ranks.map((r, k) => `<circle cx="${X(k).toFixed(1)}" cy="${Y(r[t]).toFixed(1)}" r="${k === ranks.length - 1 ? 4 : 2.6}" fill="${color}" stroke="transparent" stroke-width="13" data-tip="${esc(teamOf(y, t))} — ${labels[k]}: #${r[t]}"/>`).join("");
       return `<path d="${d}" fill="none" stroke="${color}" stroke-width="2.4" stroke-linejoin="round" opacity=".9"/>${dots}
         <text x="${(X(ranks.length - 1) + 10).toFixed(1)}" y="${(Y(last) + 3.5).toFixed(1)}" style="font-family:var(--font);font-size:11px;fill:var(--ink)">${esc(teamOf(y, t).slice(0, 24))}</text>`;
     }).join("");
@@ -1043,7 +1092,7 @@ views.lab = () => {
       corner(padL + 4, h - padB - 6, "start", "Sleepy corner 😴");
     const ax = `<text x="${(w + padL - padR) / 2}" y="${h - 6}" text-anchor="middle" style="${gtxt}">points scored vs league mean →</text>` +
       `<text x="10" y="${(h + padT - padB) / 2}" transform="rotate(-90 10 ${(h + padT - padB) / 2})" text-anchor="middle" style="${gtxt}">points against vs mean →</text>`;
-    const dots = fatePts.map(p => `<circle cx="${X(p.x).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="3.6" fill="${p.gold ? "var(--gold)" : p.bad ? "var(--bad)" : "var(--accent)"}" opacity="${p.gold || p.bad ? ".95" : ".4"}"><title>${esc(p.t)}</title></circle>`).join("");
+    const dots = fatePts.map(p => `<circle cx="${X(p.x).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="3.6" fill="${p.gold ? "var(--gold)" : p.bad ? "var(--bad)" : "var(--accent)"}" opacity="${p.gold || p.bad ? ".95" : ".4"}" stroke="transparent" stroke-width="14" data-tip="${esc(p.t)}"/>`).join("");
     return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;max-width:680px;height:auto;display:block">${cross}${labels}${ax}${dots}</svg>`;
   })();
 

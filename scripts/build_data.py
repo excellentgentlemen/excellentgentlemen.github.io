@@ -34,7 +34,14 @@ def norm(s: str) -> str:
 def clean_manager(s: str) -> str:
     s = (s or "").strip()
     s = re.sub(r"(Co-)?Commissioner$", "", s).strip()
-    return s or "?"
+    return NAME_FIXES.get(s.lower(), s) or "?"
+
+
+# Two Zachs in the league, so both carry a last initial everywhere they appear.
+NAME_FIXES = {
+    "zach olson": "Zach O",
+    "zach": "Zach B",
+}
 
 
 # Hidden Yahoo accounts identified by Bennett; key = (year, normalized team name).
