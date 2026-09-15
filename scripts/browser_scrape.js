@@ -147,7 +147,8 @@ window.__egl = window.__egl || {data: {}};
     const txt = document.body.innerText || "";
     const weekM = txt.match(/Matchups[^\n]*\n\s*Week (\d+)/);
     // blocks look like: Team\n0-0-0\n \n \n40.12\n105.53\n\tvs\t\n6.30\n102.80\n \n \nTeam\n0-0-0
-    const re = /\n([^\n]+)\n(\d+-\d+-\d+)\s+([\d.]+)\s+([\d.]+)\s+vs\s+([\d.]+)\s+([\d.]+)\s+([^\n]+)\n(\d+-\d+-\d+)/g;
+    // once the season starts each record line gains a standing suffix: "0-1-0 | 11th"
+    const re = /\n([^\n]+)\n(\d+-\d+-\d+)(?: \| \d+\w*)?\s+([\d.]+)\s+([\d.]+)\s+vs\s+([\d.]+)\s+([\d.]+)\s+([^\n]+)\n(\d+-\d+-\d+)/g;
     const teams = [];
     let m;
     while ((m = re.exec(txt))) {
