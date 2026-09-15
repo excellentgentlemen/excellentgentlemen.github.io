@@ -206,4 +206,5 @@ select.ctl {
 }
 .tipbox.on { opacity: 1; transform: translateY(0); }
 [data-tip] { cursor: pointer; }
-svg [data-tip].lit { stroke: var(--ink) !important; stroke-width: 1.6 !important; opacity: 1 !important; }
+svg [data-tip] { transition: r .1s ease; }
+svg [data-tip].lit { stroke: var(--ink) !important; stroke-width: 1.8 !important; opacity: 1 !important; }
