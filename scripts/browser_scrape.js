@@ -170,10 +170,26 @@ window.__egl = window.__egl || {data: {}};
   // Season fantasy points for every player, from the league Player List (paged).
   // Used for draft best/worst-pick value. Offense + kickers key by Yahoo player id;
   // team defenses have no player id, so they key as "DEF:<Name>".
+  // Yahoo inserts a games-played column once the season starts, so the Fan Pts
+  // cell is not at a fixed index. Find it from the last header row instead: the
+  // body has a couple of leading cells (checkbox, note) with no matching th, so
+  // the offset is simply (cells - headers).
+  const fanPtsCol = (table) => {
+    const hrows = Array.from(table.querySelectorAll("thead tr"));
+    const last = hrows[hrows.length - 1];
+    const body = table.querySelector("tbody tr");
+    if (!last || !body) return null;
+    const ths = Array.from(last.querySelectorAll("th")).map(x => x.textContent.trim().replace(/\s+/g, " "));
+    const i = ths.indexOf("Fan Pts");
+    if (i < 0) return null;
+    return i + (body.querySelectorAll("td").length - ths.length);
+  };
+
   window.__egl.playerStats = async (base, year, maxOff) => {
     const sleep = ms => new Promise(z => setTimeout(z, ms));
     const out = {};
     const grab = async (pos, last) => {
+      let col = null;
       for (let c = 0; c <= last; c += 25) {
         const url = `${base}/players?status=ALL&pos=${pos}&stat1=S_S_${year}&sort=PR&sdir=1&count=${c}`;
         let d;
@@ -181,11 +197,15 @@ window.__egl = window.__egl || {data: {}};
           const r = await fetch(url, {credentials: "same-origin"});
           d = new DOMParser().parseFromString(await r.text(), "text/html");
         } catch (e) { break; }
-        const trs = d.querySelectorAll("table tbody tr");
+        const table = d.querySelector("table");
+        if (!table) break;
+        if (col === null) col = fanPtsCol(table);
+        if (col === null) break;
+        const trs = table.querySelectorAll("tbody tr");
         if (!trs.length) break;
         for (const tr of trs) {
           const td = Array.from(tr.querySelectorAll("td")).map(x => x.textContent.trim().replace(/\s+/g, " "));
-          if (td.length < 9) continue;
+          if (td.length <= col) continue;
           const a = tr.querySelector('a[href*="/nfl/players/"]');
           let key = null, nm = null, ppos = null;
           if (a) {
@@ -199,7 +219,7 @@ window.__egl = window.__egl || {data: {}};
             if (nm && !/^(Who is|Only |Any )/.test(nm)) key = "DEF:" + nm;
           }
           if (!key) continue;
-          out[key] = {n: nm, pts: parseFloat(td[6]) || 0, pr: parseInt(td[7]) || null, pos: ppos};
+          out[key] = {n: nm, pts: parseFloat(td[col]) || 0, pos: ppos};
         }
         await sleep(250);
       }
