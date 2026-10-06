@@ -525,6 +525,7 @@ views.now = () => {
   ${weekLog.length ? `<h2>Weekly punishment log <span class="dim small">lowest score each week</span></h2>
   <div class="tablewrap"><table><thead><tr><th class="num">Week</th><th>🧊 Lowest scorer</th><th class="num">Pts</th><th>✦ Top scorer</th><th class="num">Pts</th></tr></thead>
   <tbody>${weekLog.map(e => `<tr><td class="num">${e.w}</td><td>${esc(e.low.team)} <span class="dim small">${mdisp(e.low.mk)}</span></td><td class="num neg">${num(e.low.score)}</td><td>${esc(e.top.team)} <span class="dim small">${mdisp(e.top.mk)}</span></td><td class="num pos">${num(e.top.score)}</td></tr>`).join("")}</tbody></table></div>` : ""}
+  ${played ? hardLuckHTML(y) : ""}
   <h2>Playoff odds <span class="dim small">projected</span></h2>
   <p class="sub">${SIMS.toLocaleString()} simulated finishes of the remaining ${remaining.length} regular-season games. Team strength = ${haveProj ? `Yahoo's current roster projections (week ${s.projections.week ?? "?"})` : "each manager's career résumé"} blended with this season's actual scoring, which takes over as results accumulate. ${played >= 2 ? "" : "These firm up meaningfully once about two weeks are in the books."}</p>
   ${table(projCols, projRows, {sortCol: 2, sortDir: -1})}
@@ -661,6 +662,8 @@ views.season = (y) => {
     <select id="wkSel" class="ctl">${weekOpts}</select></h2>
   <div id="wkBox"></div>` : `<p class="note">No completed weeks yet — scores appear here once week 1 wraps up.</p>`}
 
+  ${hardLuckHTML(y)}
+
   <h2>Draft — round 1</h2>
   ${(() => {
     const r1 = s.draft.picks.filter(p => p[1] === 1);
@@ -703,6 +706,66 @@ const gameRows = () => {
   }
   return _gameRows;
 };
+
+// The Ricky Bobby Award: losses where the team posted the SECOND-highest score
+// of that week. If you ain't first, you're last. The only way to lose with the
+// week's second-best score is to run into the one team that scored more.
+let _ruLoss = null;
+const runnerUpLosses = () => {
+  if (_ruLoss) return _ruLoss;
+  const out = [];
+  for (const y of years()) {
+    const s = L.seasons[y];
+    const byWeek = {};
+    for (const m of s.matchups) {
+      (byWeek[m.w] = byWeek[m.w] || []).push(
+        {tid: m.a, score: m.as, oppTid: m.b, opp_score: m.bs},
+        {tid: m.b, score: m.bs, oppTid: m.a, opp_score: m.as});
+    }
+    for (const [w, list] of Object.entries(byWeek)) {
+      if (list.length < 2) continue;
+      const r = [...list].sort((a, b) => b.score - a.score)[1];
+      if (r.score >= r.opp_score) continue;   // only counts if that team lost
+      const mean = s.season_mean_score;
+      out.push({year: +y, week: +w, mk: mgrOfTeam(y, r.tid),
+        team: s.teams[r.tid].name, manager: s.teams[r.tid].manager,
+        score: r.score, opp: s.teams[r.oppTid].name, opp_score: r.opp_score,
+        norm: mean ? Math.round(1000 * r.score / mean) / 10 : null,
+        margin: Math.round((r.opp_score - r.score) * 100) / 100});
+    }
+  }
+  out.sort((a, b) => b.score - a.score);
+  _ruLoss = out;
+  return out;
+};
+
+// One season's bad-beat block: the biggest losing score, plus who kept drawing
+// the week's hottest team. Shared by the season pages and This Season.
+function hardLuckHTML(y) {
+  const s = L.seasons[y];
+  if (!s || !s.matchups.length) return "";
+  const losses = gameRows().filter(r => r.year === +y && !r.won);
+  if (!losses.length) return "";
+  const best = [...losses].sort((a, b) => b.score - a.score)[0];
+  const ru = runnerUpLosses().filter(r => r.year === +y);
+  const tally = {};
+  for (const r of ru) (tally[r.mk] = tally[r.mk] || []).push(r.week);
+  const tRows = Object.entries(tally).map(([mk, weeks]) => ({mk, n: weeks.length, weeks: weeks.sort((a, b) => a - b)}));
+  return `
+  <h2>Hard luck <span class="dim small">${y}</span></h2>
+  <p class="sub">The losses that weren't really about the roster. Scoring enough to beat almost anyone, and drawing the one team that scored more.</p>
+  <div class="statrow">
+    <div class="stat"><div class="v num">${num(best.score)}</div>
+      <div class="l">Most points in a loss — ${esc(best.team)} <span class="dim">${mdisp(best.mk)}</span>, week ${best.week}, beaten by ${esc(best.opp)} ${num(best.opp_score)}</div></div>
+    <div class="stat ${ru.length ? "" : "dim"}"><div class="v num">${ru.length}</div>
+      <div class="l">🏁 <b>Ricky Bobby Awards</b> — if you ain't first, you're last: lost with the week's second-best score</div></div>
+  </div>
+  ${tRows.length ? table([
+    {h: "Manager", val: r => mname(r.mk), fmt: r => mlink(r.mk)},
+    {h: "Ricky Bobbys", num: 1, val: r => r.n, fmt: r => `<b class="num">${r.n}</b>`},
+    {h: "Weeks", val: r => r.weeks[0], fmt: r => r.weeks.map(w => `<span class="chip plain">wk ${w}</span>`).join(" ")},
+  ], tRows, {sortCol: 1, sortDir: -1}) : `<p class="note">No Ricky Bobby Awards yet this season — nobody has lost with the week's second-best score.</p>`}`;
+}
 
 let _lows = null;
 const weeklyLows = () => {
@@ -761,6 +824,7 @@ views.managers = () => {
       const tot = totalRec(mk);
       return {mk, name: mname(mk), ...L.managers[mk].career, st: L.managers[mk].streaks,
         finq: finishQuality(mk), lows: weeklyLows()[mk] || 0, apw, apl,
+        rul: runnerUpLosses().filter(r => r.mk === mk).length,
         tw: tot.w, tl: tot.l, tt: tot.t, tpct: tot.pct, pow: tot.po.w, pol: tot.po.l};
     });
   const cols = [
@@ -780,6 +844,8 @@ views.managers = () => {
     {h: "Luck", num: 1, val: r => r.luck, fmt: r => `<span class="${r.luck >= 0 ? "pos" : "neg"}">${plus(r.luck)}</span>`},
     {h: "Weekly highs", num: 1, val: r => r.crowns},
     {h: "Weekly lows", num: 1, val: r => r.lows},
+    {h: "Ricky Bobbys", num: 1, val: r => r.seasons ? r.rul / r.seasons : 0,
+     fmt: r => r.rul ? `<span class="num">${r.rul}</span> <span class="dim small">${num(r.rul / r.seasons, 2)}/szn</span>` : "—"},
     {h: "Avg draft slot", num: 1, val: r => r.avg_draft_slot, fmt: r => num(r.avg_draft_slot, 1)},
     {h: "Sackos", num: 1, val: r => r.last_places, fmt: r => r.last_places ? "💀".repeat(r.last_places) : "—"},
   ];
@@ -793,6 +859,7 @@ views.managers = () => {
   <span>“All-play” = your record if you'd played every team every week — pure scoring strength, schedule luck removed.</span>
   <span>“Finish quality” = average standing normalized for league size (100% = champion, 0% = last) — comparable across the 8/10/12/14-team eras, unlike raw average finish.</span>
   <span>“PPG vs mean” = career scoring relative to each season's league average — comparable across rule eras.</span>
+  <span>“Ricky Bobbys” = if you ain't first, you're last: losses where you posted the second-best score of the week. Sorted by how often it happens per season.</span>
   <span>“Luck” = career wins above/below the all-play deserved record.</span><span>💀 = last-place finish.</span></p>
   <p class="small" style="margin-top:14px"><a class="chip plain" href="#/lab">Waiver moves and other charts live in the Lab →</a></p>`;
 };
@@ -1229,6 +1296,7 @@ views.records = () => {
     biggest_blowout: sortBy(rows.filter(r => r.won), r => r.margin),
     closest_game: sortBy(rows.filter(r => r.margin !== 0), r => Math.abs(r.margin), false),
     best_loss: sortBy(rows.filter(r => !r.won), r => r.score),
+    runner_up: runnerUpLosses().filter(r => inc(r.mk)),
     worst_win: sortBy(rows.filter(r => r.won), r => r.score, false),
   };
   const combos = [];
@@ -1274,6 +1342,29 @@ views.records = () => {
     {h: "Score", num: 1, val: r => r.score, fmt: r => num(r.score)}])}
   ${sec("Most points in a loss", "robbed at gunpoint", R.best_loss, [
     {h: "Score", num: 1, val: r => r.score, fmt: r => `<b class="num">${num(r.score)}</b>`}])}
+  ${sec("🏁 The Ricky Bobby Award", "if you ain't first, you're last — lost while posting the week's second-best score", R.runner_up, [
+    {h: "Score", num: 1, val: r => r.score, fmt: r => `<b class="num">${num(r.score)}</b>`},
+    {h: "Lost by", num: 1, val: r => r.margin, fmt: r => `<span class="neg num">−${num(r.margin)}</span>`}])}
+  ${(() => {
+    const tally = {};
+    for (const r of R.runner_up) (tally[r.mk] = tally[r.mk] || []).push(r);
+    const tRows = Object.entries(tally).map(([mk, list]) => ({
+      mk, n: list.length, seasons: L.managers[mk]?.career.seasons || 1,
+      best: Math.max(...list.map(r => r.score)),
+      years: [...new Set(list.map(r => r.year))].sort(),
+    }));
+    if (!tRows.length) return "";
+    return `<h2>Ricky Bobby leaderboard <span class="dim small">most second-best-and-still-lost weeks</span></h2>
+    <p class="sub">Shake and bake. Running into the week's hottest team is pure draw, not skill, but somebody always collects more than their share of these.</p>
+    ${table([
+      {h: "Manager", val: r => mname(r.mk), fmt: r => mlink(r.mk)},
+      {h: "Times", num: 1, val: r => r.n, fmt: r => `<b class="num">${r.n}</b>`},
+      {h: "Szns", num: 1, val: r => r.seasons},
+      {h: "Per season", num: 1, val: r => r.n / r.seasons, fmt: r => num(r.n / r.seasons, 2)},
+      {h: "Worst one", num: 1, val: r => r.best, fmt: r => `<span class="num">${num(r.best)}</span>`},
+      {h: "Years", val: r => r.years[0], fmt: r => r.years.map(v => `<a class="chip plain" href="#/season/${v}">${v}</a>`).join(" ")},
+    ], tRows, {sortCol: 1, sortDir: -1})}`;
+  })()}
   ${sec("Fewest points in a win", "winning ugly", R.worst_win, [
     {h: "Score", num: 1, val: r => r.score, fmt: r => `<b class="num">${num(r.score)}</b>`}])}
 
