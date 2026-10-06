@@ -19,10 +19,15 @@ OUT = ROOT / "docs" / "data"
 OUT.mkdir(parents=True, exist_ok=True)
 
 WARN = []
+NOTES = []
 
 
 def warn(msg):
     WARN.append(msg)
+
+
+def note(msg):
+    NOTES.append(msg)
 
 
 def norm(s: str) -> str:
@@ -160,6 +165,29 @@ def parse_matchups(S, byname):
                     warn(f"{S['year']} wk{wk}: mirror mismatch {a}v{b}: {pa}/{pb} vs {sa}/{sb}")
             else:
                 seen[key] = (sa, sb)
+    # A week that has finished playing but that Yahoo has not finalized yet is
+    # missing from the schedules (no Win/Loss marker) and its scores there are
+    # stale. Take it from the live matchup module instead.
+    live = S.get("live_week") or {}
+    if live.get("complete") and live.get("week"):
+        wk = int(live["week"])
+        if not any(w == wk for (w, _a, _b) in seen):
+            added = 0
+            for row in live.get("games") or []:
+                if len(row) < 4:
+                    continue
+                an, asc, bn, bsc = row[0], row[1], row[2], row[3]
+                t, o = byname.get(norm(an)), byname.get(norm(bn))
+                if not t or not o:
+                    warn(f"{S['year']} wk{wk}: live team not found: {an if not t else bn}")
+                    continue
+                a, b = sorted([t, o], key=int)
+                sa, sb = (float(asc), float(bsc)) if a == t else (float(bsc), float(asc))
+                seen[(wk, a, b)] = (sa, sb)
+                added += 1
+            if added:
+                note(f"week {wk} taken from the live scoreboard ({added} games, Yahoo has not finalized it yet)")
+
     return [{"w": w, "a": a, "b": b, "as": s[0], "bs": s[1]}
             for (w, a, b), s in sorted(seen.items())]
 
@@ -498,7 +526,8 @@ def build():
             "weeks": weeks,
             "in_progress": in_progress,
             "schedule": parse_schedule(S, byname),
-            "projections": parse_projections(S, byname),
+            "projections": (None if (S.get("live_week") or {}).get("complete")
+                            else parse_projections(S, byname)),
             "draft_value": parse_draft_value(S, draft, teams),
         }
 
@@ -718,6 +747,10 @@ def build():
         print("\nPOSSIBLE same-person managers (need Bennett's confirmation):")
         for a, b in suspects:
             print(f"  {a}  <->  {b}")
+    if NOTES:
+        print("\nNotes:")
+        for n in NOTES:
+            print("  " + n)
     print(f"\nWarnings ({len(WARN)}):")
     for w in WARN[:40]:
         print("  " + w)

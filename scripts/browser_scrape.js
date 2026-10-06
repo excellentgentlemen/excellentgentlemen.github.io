@@ -123,6 +123,12 @@ window.__egl = window.__egl || {data: {}};
     // Yahoo's roster-based weekly projections, read from the LIVE league page's matchup
     // module (document.body.innerText has real line breaks; fetched docs don't).
     try { S.projections = window.__egl.projections(); } catch (e) { S.projections = null; }
+    // Yahoo does not flip a week to "final" (or refresh the schedule pages) until
+    // Tuesday morning, so between the last whistle and that flip the schedule
+    // still shows stale partial scores. The live matchup module is correct the
+    // whole time, so capture it; "complete" means every roster has finished
+    // (live equals projected for all 28 teams), which is safe to treat as final.
+    try { S.live_week = window.__egl.liveWeek(); } catch (e) { S.live_week = null; }
     try {
       const all = await window.__egl.playerStats(base, year);
       // keep only drafted players — that is all the draft report card needs, and it
@@ -166,6 +172,25 @@ window.__egl = window.__egl || {data: {}};
     return {week: weekM ? +weekM[1] : null, teams};
   };
 
+
+  // The current week's games straight from the live matchup module, with a flag
+  // for whether every roster is done. Used to publish a week that has finished
+  // playing but that Yahoo has not finalized yet.
+  window.__egl.liveWeek = () => {
+    const txt = document.body.innerText || "";
+    const week = +(txt.match(/Week (\d+) Matchups/) || [])[1] || null;
+    const re = /\n([^\n]+)\n(\d+-\d+-\d+)(?: \| \d+\w*)?\s+([\d.]+)\s+([\d.]+)\s+vs\s+([\d.]+)\s+([\d.]+)\s+([^\n]+)\n(\d+-\d+-\d+)/g;
+    const games = [];
+    let m, complete = true;
+    while ((m = re.exec(txt))) {
+      const a = {team: m[1].trim(), live: +m[3], proj: +m[4]};
+      const b = {team: m[7].trim(), live: +m[5], proj: +m[6]};
+      for (const t of [a, b]) if (!(t.live > 0) || Math.abs(t.live - t.proj) > 0.001) complete = false;
+      games.push([a.team, a.live, b.team, b.live]);
+    }
+    if (!games.length) return null;
+    return {week, complete, games};
+  };
 
   // Season fantasy points for every player, from the league Player List (paged).
   // Used for draft best/worst-pick value. Offense + kickers key by Yahoo player id;
