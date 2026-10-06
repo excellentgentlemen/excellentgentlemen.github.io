@@ -257,7 +257,7 @@ views.home = () => {
   <p class="kicker">Est. 2015 · ${ys.length} seasons</p>
   <h1>The Excellent Gentlemen</h1>
   <p class="sub">Born <em>League of Extraordinary Men</em>, briefly <em>Bad Boyz</em>, now permanently distinguished.
-  Eleven years of glory, heartbreak, and drafting kickers too early — all of it on the record.</p>
+  ${ys.filter(y => !L.seasons[y].in_progress).length} years of glory, heartbreak, and drafting kickers too early — all of it on the record.</p>
   ${filterPills("applies to leaderboards site-wide; history stays history")}
 
   <div class="statrow">
@@ -318,6 +318,21 @@ views.home = () => {
       <h3>${mdisp(king.lk)} — ${king.n}</h3>
       <p class="dim small">Career count of scoring the week's worst total. Chasing the crown: ${rest.slice(0, 2).map(r => `${mdisp(r.lk)} (${r.n})`).join(", ")}. Full table in Honors.</p></a>`;
     })()}
+    ${(() => {
+      const ru = runnerUpLosses().filter(r => inc(r.mk));
+      if (!ru.length) return "";
+      const tally = {};
+      for (const r of ru) tally[r.mk] = (tally[r.mk] || 0) + 1;
+      const board = Object.entries(tally).map(([mk, n]) => ({mk, n})).sort((a, b) => b.n - a.n);
+      const king = board[0];
+      const worst = ru[0];   // runnerUpLosses() is sorted by score, highest first
+      const chasing = board.filter(b => b.n === king.n).length > 1
+        ? `Tied with ${board.filter(b => b.n === king.n && b.mk !== king.mk).map(b => mdisp(b.mk)).join(", ")}.`
+        : `Next: ${board.slice(1, 3).map(b => `${mdisp(b.mk)} (${b.n})`).join(", ")}.`;
+      return `<a class="card" href="#/records"><div class="kicker">🏁 Ricky Bobby Award · if you ain't first, you're last</div>
+      <h3>${mdisp(king.mk)} — ${king.n}</h3>
+      <p class="dim small">Lost while posting the <b>second-best</b> score of the week: all you can do is scoreboard-watch and swear. ${chasing} ${ru.length} handed out across ${ys.length} seasons. The cruellest: ${esc(worst.team)}, ${num(worst.score)} in ${worst.year} week ${worst.week}.</p></a>`;
+    })()}
     <a class="card" href="#/records"><div class="kicker">Closest game ever</div>
       <h3>${num(Math.abs(close.margin))} points</h3>
       <p class="dim small">${esc(close.team)} ${num(close.score)} — ${num(close.opp_score)} ${esc(close.opp)}, ${close.year} week ${close.week}.</p></a>
@@ -325,7 +340,7 @@ views.home = () => {
       <h3>by ${num(blow.margin)}</h3>
       <p class="dim small">${esc(blow.team)} ${num(blow.score)} — ${num(blow.opp_score)} ${esc(blow.opp)}, ${blow.year} week ${blow.week}.</p></a>
     <a class="card" href="#/rivalries"><div class="kicker">Rivalries</div>
-      <h3>Head-to-head, all eleven years</h3>
+      <h3>Head-to-head, every season</h3>
       <p class="dim small">Every matchup ever played, tallied. Find out who actually owns whom.</p></a>
   </div>`;
 };
