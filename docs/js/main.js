@@ -319,6 +319,14 @@ views.home = () => {
       <p class="dim small">Career count of scoring the week's worst total. Chasing the crown: ${rest.slice(0, 2).map(r => `${mdisp(r.lk)} (${r.n})`).join(", ")}. Full table in Honors.</p></a>`;
     })()}
     ${(() => {
+      const rs = ratings().filter(r => inc(r.mk) && !r.provisional);
+      if (rs.length < 3) return "";
+      const [a, b, c] = rs;
+      return `<a class="card" href="#/managers"><div class="kicker">Manager rating · out of 100</div>
+      <h3>${mdisp(a.mk)} — ${a.score}</h3>
+      <p class="dim small">Scoring, all-play, finishes, hardware and playoff record on one scale, where 50 is league average. Then ${mdisp(b.mk)} (${b.score}) and ${mdisp(c.mk)} (${c.score}). Full board in Managers.</p></a>`;
+    })()}
+    ${(() => {
       const ru = runnerUpLosses().filter(r => inc(r.mk));
       if (!ru.length) return "";
       const tally = {};
@@ -820,6 +828,85 @@ const totalRec = mk => {
   return {w, l, t, pct: (w + 0.5 * t) / Math.max(w + l + t, 1), po: p};
 };
 
+// ── manager rating ────────────────────────────────────────────────────────
+// One number out of 100 per manager. Five parts, each first turned into a
+// score against the rest of the league (50 = league average, every 15 points
+// is one standard deviation), then weighted:
+//   Scoring   22%  career points per game vs each season's league average
+//   All-play  24%  record if you'd played every team every week
+//   Finishes  22%  average final standing, normalized for league size
+//   Hardware  22%  titles, podiums and playoff trips per season, less sackos
+//   Playoffs  10%  postseason record, nudged toward .500 on small samples
+// Luck is deliberately absent: it measures the schedule, not the manager.
+// The total is then pulled toward 50 by how little a manager has played, so a
+// hot rookie season cannot outrank a decade, and finally spread back out
+// against the league so the number uses the whole scale.
+const RATING_PARTS = [
+  {k: "scoring", h: "Scoring", w: 0.22, why: "points per game vs the league average that season"},
+  {k: "allplay", h: "All-play", w: 0.24, why: "record if you had played every team every week"},
+  {k: "finishes", h: "Finishes", w: 0.22, why: "average final standing, normalized for league size"},
+  {k: "hardware", h: "Hardware", w: 0.22, why: "titles, podiums and playoff trips per season, less sackos"},
+  {k: "playoffs", h: "Playoffs", w: 0.10, why: "postseason record, nudged toward .500 when the sample is small"},
+];
+
+let _ratings = null;
+const ratings = () => {
+  if (_ratings) return _ratings;
+  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+  const raw = {};
+  for (const mk of Object.keys(L.managers)) {
+    const c = L.managers[mk].career, sns = Object.values(L.managers[mk].seasons);
+    let apw = 0, apl = 0;
+    for (const sn of sns) { apw += sn.ap_w || 0; apl += sn.ap_l || 0; }
+    const po = poRec(mk);
+    raw[mk] = {
+      seasons: c.seasons,
+      games: c.w + c.l + c.t,
+      scoring: c.avg_ppg_norm == null ? 100 : c.avg_ppg_norm,
+      allplay: apw / Math.max(apw + apl, 1),
+      finishes: finishQuality(mk) ?? 50,
+      // a title is worth twice a podium and four times a playoff trip; a sacko
+      // claws a full point back, all of it per season so tenure is not a tax
+      hardware: (3 * c.titles + 1.5 * Math.max(c.podiums - c.titles, 0)
+                 + 0.75 * c.playoff_apps - 1.0 * c.last_places) / Math.max(c.seasons, 1),
+      playoffs: (po.w + 2) / (po.g + 4),
+    };
+  }
+  // calibrate against managers with at least two seasons, so one-year cameos
+  // cannot drag the league's yardstick around
+  const base = Object.values(raw).filter(r => r.seasons >= 2);
+  const stat = {};
+  for (const {k} of RATING_PARTS) {
+    const xs = base.map(r => r[k]);
+    const mu = xs.reduce((a, b) => a + b, 0) / xs.length;
+    const sd = Math.sqrt(xs.reduce((a, b) => a + (b - mu) ** 2, 0) / xs.length) || 1;
+    stat[k] = {mu, sd};
+  }
+  const out = [];
+  for (const [mk, r] of Object.entries(raw)) {
+    const parts = {};
+    for (const {k} of RATING_PARTS) parts[k] = clamp(50 + 15 * (r[k] - stat[k].mu) / stat[k].sd, 2, 98);
+    const blend = RATING_PARTS.reduce((a, p) => a + p.w * parts[p.k], 0);
+    // shrink toward average by sample size: 45 games is about three seasons
+    const shrunk = 50 + (blend - 50) * (r.games / (r.games + 45));
+    out.push({mk, parts, shrunk, ...r});
+  }
+  const q = out.filter(r => r.seasons >= 2).map(r => r.shrunk);
+  const mu = q.reduce((a, b) => a + b, 0) / q.length;
+  const sd = Math.sqrt(q.reduce((a, b) => a + (b - mu) ** 2, 0) / q.length) || 1;
+  for (const r of out) {
+    r.score = Math.round(clamp(50 + 16 * (r.shrunk - mu) / sd, 1, 99));
+    r.provisional = r.seasons < 2;
+  }
+  out.sort((a, b) => b.score - a.score || b.games - a.games);
+  out.forEach((r, i) => r.rank = i + 1);
+  _ratings = out;
+  return out;
+};
+
+const ratingTier = s => s >= 70 ? ["Elite", "gold"] : s >= 60 ? ["Contender", "pos"]
+  : s >= 48 ? ["Solid", ""] : s >= 35 ? ["Streaky", ""] : ["Rebuilding", "neg"];
+
 const finishQuality = mk => {
   const qs = Object.entries(L.managers[mk].seasons)
     .map(([y, s]) => {
@@ -869,6 +956,29 @@ views.managers = () => {
   <h1>Managers</h1>
   <p class="sub">Career numbers across every season and league name. Click any column to re-sort; click a manager for the full story.</p>
   ${filterPills()}
+
+  ${(() => {
+    const rs = ratings().filter(r => inc(r.mk));
+    if (!rs.length) return "";
+    const bar = (v, cls) => `<span class="meter"><i style="width:${Math.round(v)}%" class="${cls || ""}"></i></span>`;
+    const cols = [
+      {h: "#", num: 1, val: r => r.rank, fmt: r => `<span class="dim num">${r.rank}</span>`},
+      {h: "Manager", val: r => mname(r.mk), fmt: r => `${mlink(r.mk)}${r.provisional ? ` <span class="chip plain">provisional</span>` : ""}`},
+      {h: "Rating", num: 1, val: r => r.score, fmt: r => `<b class="num big-score ${ratingTier(r.score)[1]}">${r.score}</b>`},
+      {h: "Tier", val: r => r.score, fmt: r => `<span class="chip ${ratingTier(r.score)[1]}">${ratingTier(r.score)[0]}</span>`},
+      {h: "Szns", num: 1, val: r => r.seasons},
+      ...RATING_PARTS.map(p => ({h: p.h, num: 1, val: r => r.parts[p.k],
+        fmt: r => `<span class="num small">${Math.round(r.parts[p.k])}</span> ${bar(r.parts[p.k], r.parts[p.k] >= 50 ? "pos" : "neg")}`})),
+    ];
+    return `<h2>Manager ratings <span class="dim small">one number, out of 100</span></h2>
+    <p class="sub">Everything a manager can control, on one scale: <b>50 is league average</b>, and every 15 points is one standard deviation away from it. Five parts go in, weighted — ${RATING_PARTS.map(p => `<b>${p.h}</b> ${Math.round(p.w * 100)}%`).join(", ")}. Luck is deliberately left out, because it measures the schedule rather than the manager.</p>
+    ${table(cols, rs, {sortCol: 2, sortDir: -1, rowHref: r => `#/manager/${encodeURIComponent(r.mk)}`})}
+    <p class="legend">${RATING_PARTS.map(p => `<span>“${p.h}” = ${p.why}.</span>`).join("")}
+    <span>Each part is scored against the rest of the league, so 50 means dead average at it and 80 means comfortably the best.</span>
+    <span>Thin résumés are pulled toward 50 until they earn their place — about three seasons of games before the rating is at full strength. “Provisional” marks a first season.</span></p>`;
+  })()}
+
+  <h2>The full ledger</h2>
   <div>${table(cols, rows, {sortCol: 5, sortDir: -1, rowHref: r => `#/manager/${encodeURIComponent(r.mk)}`})}</div>
   <p class="legend"><span>“Overall” = regular season + playoffs combined (placement games included); “Pct” is the overall winning percentage.</span>
   <span>“All-play” = your record if you'd played every team every week — pure scoring strength, schedule luck removed.</span>

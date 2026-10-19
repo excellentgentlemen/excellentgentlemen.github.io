@@ -208,3 +208,17 @@ select.ctl {
 [data-tip] { cursor: pointer; }
 svg [data-tip] { transition: r .1s ease; }
 svg [data-tip].lit { stroke: var(--ink) !important; stroke-width: 1.8 !important; opacity: 1 !important; }
+
+/* ── rating meters ── */
+.meter {
+  display: inline-block; vertical-align: middle;
+  width: 46px; height: 5px; border-radius: 3px;
+  background: var(--line); overflow: hidden; margin-left: 5px;
+}
+.meter i { display: block; height: 100%; background: var(--ink-3); border-radius: 3px; }
+.meter i.pos { background: var(--accent); }
+.meter i.neg { background: var(--bad); }
+.big-score { font-size: 16px; font-weight: 800; }
+.chip.pos { background: var(--accent-soft); color: var(--accent); }
+.chip.gold { background: var(--gold-soft); color: var(--gold); }
+.chip.neg { background: var(--bad-soft); color: var(--bad); }
