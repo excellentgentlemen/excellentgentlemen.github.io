@@ -324,7 +324,7 @@ views.home = () => {
       const [a, b, c] = rs;
       return `<a class="card" href="#/managers"><div class="kicker">Manager rating · out of 100</div>
       <h3>${mdisp(a.mk)} — ${a.score}</h3>
-      <p class="dim small">Scoring, all-play, finishes, hardware and playoff record on one scale, where 50 is league average. Then ${mdisp(b.mk)} (${b.score}) and ${mdisp(c.mk)} (${c.score}). Full board in Managers.</p></a>`;
+      <p class="dim small">Half scoring, half what you have to show for it — finishes, hardware and playoff record — on one scale where 50 is league average. Then ${mdisp(b.mk)} (${b.score}) and ${mdisp(c.mk)} (${c.score}). Full board in Managers.</p></a>`;
     })()}
     ${(() => {
       const ru = runnerUpLosses().filter(r => inc(r.mk));
@@ -829,25 +829,27 @@ const totalRec = mk => {
 };
 
 // ── manager rating ────────────────────────────────────────────────────────
-// One number out of 100 per manager. Five parts, each first turned into a
-// score against the rest of the league (50 = league average, every 15 points
-// is one standard deviation), then weighted:
-//   Scoring   22%  career points per game vs each season's league average
-//   All-play  24%  record if you'd played every team every week
-//   Finishes  22%  average final standing, normalized for league size
-//   Hardware  22%  titles, podiums and playoff trips per season, less sackos
+// One number out of 100 per manager, split half and half between how well you
+// score and what you have to show for it:
+//   Scoring   50%  points per game vs the season average AND the all-play
+//                  record, averaged — the two correlate at 0.97 here, so they
+//                  are one signal and are counted once
+//   Finishes  20%  average final standing, normalized for league size
+//   Hardware  20%  titles, podiums and playoff trips per season, less sackos
 //   Playoffs  10%  postseason record, nudged toward .500 on small samples
-// Luck is deliberately absent: it measures the schedule, not the manager.
-// The total is then pulled toward 50 by how little a manager has played, so a
-// hot rookie season cannot outrank a decade, and finally spread back out
-// against the league so the number uses the whole scale.
+// Each part is first scored against the rest of the league: 50 is average and
+// every 15 points is one standard deviation. Luck is deliberately absent — it
+// measures the schedule, not the manager. The total is then pulled toward 50
+// by how little a manager has played, so a hot rookie season cannot outrank a
+// decade, and finally spread back out so the number uses the whole scale.
 const RATING_PARTS = [
-  {k: "scoring", h: "Scoring", w: 0.22, why: "points per game vs the league average that season"},
-  {k: "allplay", h: "All-play", w: 0.24, why: "record if you had played every team every week"},
-  {k: "finishes", h: "Finishes", w: 0.22, why: "average final standing, normalized for league size"},
-  {k: "hardware", h: "Hardware", w: 0.22, why: "titles, podiums and playoff trips per season, less sackos"},
+  {k: "scoring", h: "Scoring", w: 0.50, why: "points per game vs the league average that season, averaged with the all-play record — what you'd be if you played every team every week"},
+  {k: "finishes", h: "Finishes", w: 0.20, why: "average final standing, normalized for league size"},
+  {k: "hardware", h: "Hardware", w: 0.20, why: "titles, podiums and playoff trips per season, less sackos"},
   {k: "playoffs", h: "Playoffs", w: 0.10, why: "postseason record, nudged toward .500 when the sample is small"},
 ];
+// the raw measurements behind the parts; scoring draws on two of them
+const RATING_INPUTS = ["ppg", "allplay", "finishes", "hardware", "playoffs"];
 
 let _ratings = null;
 const ratings = () => {
@@ -862,7 +864,7 @@ const ratings = () => {
     raw[mk] = {
       seasons: c.seasons,
       games: c.w + c.l + c.t,
-      scoring: c.avg_ppg_norm == null ? 100 : c.avg_ppg_norm,
+      ppg: c.avg_ppg_norm == null ? 100 : c.avg_ppg_norm,
       allplay: apw / Math.max(apw + apl, 1),
       finishes: finishQuality(mk) ?? 50,
       // a title is worth twice a podium and four times a playoff trip; a sacko
@@ -876,16 +878,20 @@ const ratings = () => {
   // cannot drag the league's yardstick around
   const base = Object.values(raw).filter(r => r.seasons >= 2);
   const stat = {};
-  for (const {k} of RATING_PARTS) {
+  for (const k of RATING_INPUTS) {
     const xs = base.map(r => r[k]);
     const mu = xs.reduce((a, b) => a + b, 0) / xs.length;
     const sd = Math.sqrt(xs.reduce((a, b) => a + (b - mu) ** 2, 0) / xs.length) || 1;
     stat[k] = {mu, sd};
   }
+  const z = (r, k) => (r[k] - stat[k].mu) / stat[k].sd;
   const out = [];
   for (const [mk, r] of Object.entries(raw)) {
     const parts = {};
-    for (const {k} of RATING_PARTS) parts[k] = clamp(50 + 15 * (r[k] - stat[k].mu) / stat[k].sd, 2, 98);
+    // points vs the league average and all-play measure the same thing twice
+    // (r = 0.97 across careers here), so they average into one Scoring part
+    parts.scoring = clamp(50 + 15 * (z(r, "ppg") + z(r, "allplay")) / 2, 2, 98);
+    for (const k of ["finishes", "hardware", "playoffs"]) parts[k] = clamp(50 + 15 * z(r, k), 2, 98);
     const blend = RATING_PARTS.reduce((a, p) => a + p.w * parts[p.k], 0);
     // shrink toward average by sample size: 45 games is about three seasons
     const shrunk = 50 + (blend - 50) * (r.games / (r.games + 45));
@@ -971,10 +977,11 @@ views.managers = () => {
         fmt: r => `<span class="num small">${Math.round(r.parts[p.k])}</span> ${bar(r.parts[p.k], r.parts[p.k] >= 50 ? "pos" : "neg")}`})),
     ];
     return `<h2>Manager ratings <span class="dim small">one number, out of 100</span></h2>
-    <p class="sub">Everything a manager can control, on one scale: <b>50 is league average</b>, and every 15 points is one standard deviation away from it. Five parts go in, weighted — ${RATING_PARTS.map(p => `<b>${p.h}</b> ${Math.round(p.w * 100)}%`).join(", ")}. Luck is deliberately left out, because it measures the schedule rather than the manager.</p>
+    <p class="sub">Everything a manager can control, on one scale: <b>50 is league average</b>, and every 15 points is one standard deviation away from it. Half the score is how well you score, half is what you have to show for it — ${RATING_PARTS.map(p => `<b>${p.h}</b> ${Math.round(p.w * 100)}%`).join(", ")}. Luck is deliberately left out, because it measures the schedule rather than the manager.</p>
     ${table(cols, rs, {sortCol: 2, sortDir: -1, rowHref: r => `#/manager/${encodeURIComponent(r.mk)}`})}
     <p class="legend">${RATING_PARTS.map(p => `<span>“${p.h}” = ${p.why}.</span>`).join("")}
     <span>Each part is scored against the rest of the league, so 50 means dead average at it and 80 means comfortably the best.</span>
+    <span>Points per game and all-play are one part, not two: across careers in this league they correlate at 0.97, so counting both would be counting the same thing twice.</span>
     <span>Thin résumés are pulled toward 50 until they earn their place — about three seasons of games before the rating is at full strength. “Provisional” marks a first season.</span></p>`;
   })()}
 
