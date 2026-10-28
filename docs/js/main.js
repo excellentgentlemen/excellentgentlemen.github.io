@@ -427,27 +427,17 @@ views.now = () => {
   const teamsArr = Object.keys(s.teams);
   const playoffTeams = s.settings.playoff_teams || 6;
   const avgPts = played ? s.season_mean_score : (L.seasons[prevY]?.season_mean_score || 115);
-  const projMap = s.projections?.by_tid || {};
-  const projWeek = s.projections?.week ?? null;
-  const haveProj = Object.keys(projMap).length >= teamsArr.length - 1;
-  // Yahoo's projection describes ONE week, byes and injuries included, so it is
-  // used for that week's game only. Applying it to the whole rest of the season
-  // once made a team averaging 117 look like a 74-point team for seven weeks
-  // because its stars happened to share a bye.
-  const resumePrior = tid => {
-    const fq = finishQuality(mgrOfTeam(y, tid));
-    return avgPts * (1 + 0.15 * ((fq == null ? 50 : fq) - 50) / 100);
-  };
+  // Team strength is each team's average score this season and nothing else:
+  // no Yahoo projections, no byes, no injuries, no rosters. While the sample is
+  // small it is pulled toward the league average (four games' worth), so one
+  // big opening week cannot make a team look unbeatable. Before any games are
+  // played every team starts equal.
   const seasonMu = {};
   teamsArr.forEach(tid => {
     const g = s.reg[tid].w + s.reg[tid].l + s.reg[tid].t;
-    // before any games, the opening-week roster projection is the best guide
-    // (no byes in week 1); once results exist, real scoring regressed toward
-    // the league average takes over
-    const base = g === 0 ? (haveProj && projMap[tid] ? projMap[tid] : resumePrior(tid)) : avgPts;
-    seasonMu[tid] = (g * s.reg[tid].ppg + 4 * base) / (g + 4);
+    seasonMu[tid] = (g * (s.reg[tid].ppg || 0) + 4 * avgPts) / (g + 4);
   });
-  const gameMu = (tid, wk) => (haveProj && wk === projWeek && projMap[tid]) ? projMap[tid] : seasonMu[tid];
+  const gameMu = tid => seasonMu[tid];
   const sigma = 0.22 * avgPts;
   const gauss = () => {
     let u = 0, v = 0;
@@ -465,8 +455,8 @@ views.now = () => {
     const w = {}, pf = {};
     teamsArr.forEach(t => { w[t] = s.reg[t].w + 0.5 * s.reg[t].t; pf[t] = s.reg[t].pf; });
     for (const g of remaining) {
-      const sa = gameMu(g.a, g.w) + sigma * gauss();
-      const sb = gameMu(g.b, g.w) + sigma * gauss();
+      const sa = gameMu(g.a) + sigma * gauss();
+      const sb = gameMu(g.b) + sigma * gauss();
       pf[g.a] += sa; pf[g.b] += sb;
       if (sa > sb) w[g.a]++; else w[g.b]++;
     }
@@ -598,9 +588,7 @@ views.now = () => {
   <tbody>${weekLog.map(e => `<tr><td class="num">${e.w}</td><td>${esc(e.low.team)} <span class="dim small">${mdisp(e.low.mk)}</span></td><td class="num neg">${num(e.low.score)}</td><td>${esc(e.top.team)} <span class="dim small">${mdisp(e.top.mk)}</span></td><td class="num pos">${num(e.top.score)}</td></tr>`).join("")}</tbody></table></div>` : ""}
   ${played ? hardLuckHTML(y) : ""}
   <h2>Playoff odds <span class="dim small">projected</span></h2>
-  <p class="sub">${SIMS.toLocaleString()} simulated finishes of the remaining ${remaining.length} regular-season games, each one played out score by score so ties break on points for, the way Yahoo breaks them. ${played
-    ? `Team strength is this season's actual scoring, pulled toward the league average while samples are small.${haveProj ? ` Yahoo's roster projections are used for week ${projWeek} only, since they price in that week's byes and injuries and say nothing about the weeks after.` : ""}`
-    : `Before any games, team strength comes from ${haveProj ? "Yahoo's opening-week roster projections" : "each manager's career résumé"}.`} ${played >= 2 ? "" : "These firm up meaningfully once about two weeks are in the books."}</p>
+  <p class="sub">${SIMS.toLocaleString()} simulated finishes of the remaining ${remaining.length} regular-season games, each played out score by score so ties break on points for, the way Yahoo breaks them. Team strength is simply each team's average score this season, pulled toward the league average while the sample is small. No projections, byes or injuries. ${played ? "" : "With no games played yet, every team starts equal."} ${played >= 2 ? "" : "These firm up meaningfully once about two weeks are in the books."}</p>
   ${table(projCols, projRows, {sortCol: 2, sortDir: -1})}
   ${bumpChart}
 
