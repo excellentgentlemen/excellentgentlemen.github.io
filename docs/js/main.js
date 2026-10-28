@@ -60,9 +60,43 @@ const TIP = (() => {
     if (el) show(el);
     else if (e.pointerType !== "touch" && lit) softHide();
   });
+  // On a phone a fingertip covers several dots at once, and the dots on the
+  // scatter charts sit a few pixels apart, so hit-testing the exact pixel is
+  // hopeless. Instead, any tap inside a chart snaps to the nearest dot within
+  // reach, and tapping the same spot again steps to the next-nearest, so a
+  // cluster can be walked through. The mouse keeps exact hits and only snaps
+  // when it lands on empty chart space.
+  let lastTap = null;
+  const dotsByDistance = (svg, x, y) => {
+    const out = [];
+    for (const d of svg.querySelectorAll("[data-tip]")) {
+      const r = d.getBoundingClientRect();
+      const dx = r.left + r.width / 2 - x, dy = r.top + r.height / 2 - y;
+      out.push([dx * dx + dy * dy, d]);
+    }
+    return out.sort((a, b) => a[0] - b[0]);
+  };
   document.addEventListener("pointerdown", e => {
-    const el = at(e);
-    if (el) { if (el === lit) hide(); else show(el); }   // tap again to dismiss
+    const touch = e.pointerType === "touch";
+    const direct = at(e);
+    const svg = e.target && e.target.closest ? e.target.closest("svg") : null;
+    if (svg && svg.querySelector("[data-tip]") && (touch || !direct)) {
+      const reach = touch ? 36 : 18;                       // px, roughly a fingertip
+      const again = lastTap && lastTap.svg === svg && Math.hypot(lastTap.x - e.clientX, lastTap.y - e.clientY) < 14;
+      // when stepping through a cluster, keep the ordering from the first tap:
+      // a finger never lands on the same pixel twice, and dots at near-equal
+      // distance would otherwise swap places and get skipped
+      const near = again ? lastTap.list : dotsByDistance(svg, e.clientX, e.clientY).filter(d => d[0] <= reach * reach);
+      if (near.length) {
+        const idx = again ? (lastTap.idx + 1) % Math.min(near.length, 8) : 0;
+        lastTap = {svg, x: again ? lastTap.x : e.clientX, y: again ? lastTap.y : e.clientY, idx, list: near};
+        if (again && near.length === 1) { hide(); lastTap = null; }   // same lone dot: dismiss
+        else show(near[idx][1]);
+        return;
+      }
+    }
+    lastTap = null;
+    if (direct) { if (direct === lit) hide(); else show(direct); }   // tap again to dismiss
     else hide();
   });
   document.addEventListener("focusin", e => { const el = at(e); if (el) show(el); });
@@ -1443,7 +1477,7 @@ views.lab = () => {
   return `
   <p class="kicker">The lab</p>
   <h1>Charts & experiments</h1>
-  <p class="sub">Every dot is one team's season. Hover anything for the who and when. Gold = championship season, red = last place.</p>
+  <p class="sub">Every dot is one finished season for one team — ${years().filter(y => !L.seasons[y].in_progress).length} seasons, ${rowsTS.length} team-seasons. The current year joins once it has a final standing. Hover or tap anything for the who and when; on a phone, tapping the same spot again steps through a cluster. Gold = championship season, red = last place.</p>
 
   <h2>The four fates</h2>
   <p class="sub">Offense (how much you scored vs the league mean) against incoming fire (how much was scored on you). Which quadrant wins titles — and which one just suffers?</p>
