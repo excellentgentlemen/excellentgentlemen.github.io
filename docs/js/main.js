@@ -477,24 +477,56 @@ views.now = () => {
     {h: "Last place", num: 1, val: r => r.last, fmt: r => `<span class="${r.last >= 15 ? "neg" : ""}">${num(r.last, 0)}%</span>`},
   ];
 
-  // ── standings race (rank by week) ──
-  const bumpChart = (() => {
-    // column 0 = preseason projected order (from the simulation), then one column per completed week
-    const projOrder = [...projRows].sort((a, b) => b.projW - a.projW || b.po - a.po);
-    const projRank = {};
-    projOrder.forEach((r, i) => projRank[r.tid] = i + 1);
-    const labels = ["Proj"];
-    const ranks = [projRank];
+  // ── the race, four ways ──
+  // Same bump chart, four things to rank by. Standings starts from the
+  // preseason projected order; the points views start at week 1, since there
+  // is nothing to project.
+  const RACE_MODES = [
+    {k: "standings", h: "Standings", sub: "Where every team actually sat after each week: wins first, points as the tiebreak. Column one is the preseason projected order, so the gap between it and week one is how wrong the projection was."},
+    {k: "pf", h: "Points for · season total", sub: "Ranked by total points scored so far, running. Ignores the schedule entirely — this is who has actually put up the most, regardless of who they drew."},
+    {k: "pa", h: "Points against · season total", sub: "Ranked by total points allowed, running, fewest at the top. Nobody controls this one. It is the clearest picture of who the schedule has been kind to."},
+    {k: "week", h: "Points that week", sub: "Ranked by that week's score alone, nothing cumulative. Spiky by design: this is the week-to-week whiplash that cumulative charts smooth away."},
+  ];
+  const raceSVG = (mode) => {
+    const withProj = mode === "standings";
+    const labels = withProj ? ["Proj"] : [];
+    const ranks = [];
+    const vals = [];
+    if (withProj) {
+      const projOrder = [...projRows].sort((a, b) => b.projW - a.projW || b.po - a.po);
+      const pr = {}; projOrder.forEach((r, i) => pr[r.tid] = i + 1);
+      ranks.push(pr);
+      vals.push(Object.fromEntries(teamsArr.map(t => [t, "projected"])));
+    }
     const cum = {};
-    teamsArr.forEach(t => cum[t] = {w: 0, pf: 0});
+    teamsArr.forEach(t => cum[t] = {w: 0, l: 0, t: 0, pf: 0, pa: 0});
     for (const wk of [...weeks].sort((a, b) => a - b)) {
       labels.push("Wk " + wk);
+      const wkPts = {};
       for (const m of s.matchups.filter(m => m.w === wk)) {
         cum[m.a].pf += m.as; cum[m.b].pf += m.bs;
-        if (m.as > m.bs) cum[m.a].w++; else if (m.bs > m.as) cum[m.b].w++; else { cum[m.a].w += 0.5; cum[m.b].w += 0.5; }
+        cum[m.a].pa += m.bs; cum[m.b].pa += m.as;
+        wkPts[m.a] = m.as; wkPts[m.b] = m.bs;
+        if (m.as > m.bs) { cum[m.a].w++; cum[m.b].l++; }
+        else if (m.bs > m.as) { cum[m.b].w++; cum[m.a].l++; }
+        else { cum[m.a].t++; cum[m.b].t++; }
       }
-      const order = [...teamsArr].sort((a, b) => cum[b].w - cum[a].w || cum[b].pf - cum[a].pf);
-      const r = {}; order.forEach((t, i) => r[t] = i + 1); ranks.push(r);
+      const metric = t => mode === "pf" ? cum[t].pf : mode === "pa" ? cum[t].pa : (wkPts[t] ?? 0);
+      const order = mode === "standings"
+        ? [...teamsArr].sort((a, b) => (cum[b].w + 0.5 * cum[b].t) - (cum[a].w + 0.5 * cum[a].t) || cum[b].pf - cum[a].pf)
+        : mode === "pa"
+          ? [...teamsArr].sort((a, b) => metric(a) - metric(b))   // fewest against ranks first
+          : [...teamsArr].sort((a, b) => metric(b) - metric(a));
+      const r = {}; order.forEach((t, i) => r[t] = i + 1);
+      ranks.push(r);
+      const v = {};
+      for (const t of teamsArr) {
+        v[t] = mode === "standings" ? rec(cum[t].w, cum[t].l, cum[t].t) + ", " + num(cum[t].pf) + " pts"
+          : mode === "pa" ? num(cum[t].pa) + " allowed"
+          : mode === "week" ? (wkPts[t] == null ? "bye" : num(wkPts[t]) + " pts")
+          : num(cum[t].pf) + " pts";
+      }
+      vals.push(v);
     }
     const W = 700, rowH = 24, padL = 46, padR = 200, padT = 16, padB = 34;
     const H = padT + rowH * n + padB;
@@ -514,14 +546,16 @@ views.now = () => {
       const color = `hsl(${Math.round(i * 360 / n)} 55% 45%)`;
       const d = ranks.map((r, k) => (k ? "L" : "M") + X(k).toFixed(1) + " " + Y(r[t]).toFixed(1)).join("");
       const last = ranks[ranks.length - 1][t];
-      const dots = ranks.map((r, k) => `<circle cx="${X(k).toFixed(1)}" cy="${Y(r[t]).toFixed(1)}" r="${k === ranks.length - 1 ? 4 : 2.6}" fill="${color}" stroke="transparent" stroke-width="9" data-tip="${esc(teamOf(y, t))} — ${labels[k]}: #${r[t]}"/>`).join("");
+      const dots = ranks.map((r, k) => `<circle cx="${X(k).toFixed(1)}" cy="${Y(r[t]).toFixed(1)}" r="${k === ranks.length - 1 ? 4 : 2.6}" fill="${color}" stroke="transparent" stroke-width="9" data-tip="${esc(teamOf(y, t))} — ${labels[k]}: #${r[t]}${vals[k] && vals[k][t] ? " · " + esc(vals[k][t]) : ""}"/>`).join("");
       return `<path d="${d}" fill="none" stroke="${color}" stroke-width="2.4" stroke-linejoin="round" opacity=".9"/>${dots}
         <text x="${(X(ranks.length - 1) + 10).toFixed(1)}" y="${(Y(last) + 3.5).toFixed(1)}" style="font-family:var(--font);font-size:11px;fill:var(--ink)">${esc(teamOf(y, t).slice(0, 24))}</text>`;
     }).join("");
-    return `<h2>Standings race</h2>
-    <p class="sub">Starts from the preseason projected order, then where every team actually sat after each completed week (wins, then points). Hover a dot for the exact spot.</p>
-    <div class="card" style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;min-width:540px;height:auto;display:block">${frame}${grid}${yl}${xl}${lines}</svg></div>`;
-  })();
+    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;min-width:540px;height:auto;display:block">${frame}${grid}${yl}${xl}${lines}</svg>`;
+  };
+  const bumpChart = `<h2 class="section-head">The race <span class="spacer"></span>
+    <select id="raceMode" class="ctl">${RACE_MODES.map((m, i) => `<option value="${m.k}" ${i ? "" : "selected"}>${m.h}</option>`).join("")}</select></h2>
+    ${RACE_MODES.map((m, i) => `<p class="sub race-sub" data-race="${m.k}" ${i ? "hidden" : ""}>${m.sub} Hover a dot for the exact spot.</p>`).join("")}
+    <div class="card" style="overflow-x:auto">${RACE_MODES.map((m, i) => `<div data-race="${m.k}" ${i ? "hidden" : ""}>${raceSVG(m.k)}</div>`).join("")}</div>`;
 
   const leader = played ? rows.find(r => r.reg_rank === 1) : null;
   const yearRows = played ? gameRows().filter(r => r.year === +y) : [];
@@ -1645,6 +1679,11 @@ function route() {
       sel.addEventListener("change", draw);
       draw();
     }
+    const race = $("#raceMode");
+    race?.addEventListener("change", () => {
+      TIP.hide();
+      document.querySelectorAll("[data-race]").forEach(el => el.hidden = el.dataset.race !== race.value);
+    });
   }
   if (name === "draft") {
     $("#draftYear")?.addEventListener("change", e => location.hash = `#/draft?y=${e.target.value}`);
