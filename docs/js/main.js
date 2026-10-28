@@ -423,9 +423,10 @@ views.now = () => {
   const played = weeks.length;
   const n = Object.keys(s.teams).length;
   const prevY = String(+y - 1);
+  const medRec = medianRecords(y);
   const rows = Object.keys(s.teams).map(tid => {
     const mk = mgrOfTeam(y, tid);
-    return {tid, mk, ...s.reg[tid], moves: s.standings[tid]?.moves, div: s.standings[tid]?.division,
+    return {tid, mk, ...s.reg[tid], ...medRec[tid], moves: s.standings[tid]?.moves, div: s.standings[tid]?.division,
       prevFin: L.managers[mk]?.seasons?.[prevY]?.final_rank ?? null,
       titles: L.managers[mk]?.career.titles ?? 0, finq: finishQuality(mk)};
   });
@@ -435,6 +436,11 @@ views.now = () => {
     {h: "Manager", val: r => mname(r.mk), fmt: r => mlink(r.mk)},
     {h: "Div", val: r => r.div || ""},
     {h: "W-L", num: 1, val: r => r.w + 0.5 * r.t, fmt: r => `<span class="num">${rec(r.w, r.l, r.t)}</span>`},
+    {h: "vs median", num: 1, val: r => r.med_w + 0.5 * r.med_t, fmt: r => `<span class="num">${rec(r.med_w, r.med_l, r.med_t)}</span>`},
+    {h: "W-L + median", num: 1, val: r => r.cmb_pct, fmt: r => {
+      const d = r.reg_rank - r.cmb_rank;
+      return `<span class="num"><b>${rec(r.cmb_w, r.cmb_l, r.cmb_t)}</b></span> <span class="dim small">#${r.cmb_rank}${d ? ` <span class="${d > 0 ? "pos" : "neg"}">${d > 0 ? "▲" : "▼"}${Math.abs(d)}</span>` : ""}</span>`;
+    }},
     {h: "PF", num: 1, val: r => r.pf, fmt: r => num(r.pf)},
     {h: "PA", num: 1, val: r => r.pa, fmt: r => num(r.pa)},
     {h: "PPG", num: 1, val: r => r.ppg, fmt: r => num(r.ppg)},
@@ -669,8 +675,9 @@ views.now = () => {
   </div>
   <h2>${played ? "Standings so far" : "The field"} <span class="dim small">with career résumés</span></h2>
   ${table(cols, rows, {sortCol: played ? 0 : 1, sortDir: 1})}
-  <p class="legend"><span>“All-play” = record if you'd played every team every week.</span><span>“Luck” = wins minus deserved wins from all-play.</span></p>
-  <p class="note" style="margin-top:10px"><b>Career finish</b> is a manager's average finishing position across every season they've played, rescaled so the 8-, 10-, 12-, and 14-team eras compare fairly: <b>100%</b> = won the title, <b>0%</b> = finished last, <b>50%</b> = dead middle of the pack. Finishing 3rd of 12 scores 82%; 3rd of 8 scores 71% — same trophy shelf, different degree of difficulty. The Titles and “${prevY} finish” columns are single facts — how many rings, where you ended last year. Career finish is the average of every year. Rookies have no history yet.</p>
+  <p class="legend"><span>“vs median” = a second game each week against the league's middle score.</span><span>“W-L + median” = your record if both games counted, and where that would rank you.</span><span>“All-play” = record if you'd played every team every week.</span><span>“Luck” = wins minus deserved wins from all-play.</span></p>
+  <p class="note" style="margin-top:10px"><b>W-L + median</b> is the standings under a two-games-a-week format: your real matchup plus a game against the median score of the whole league that week. Beat the median and you bank a second win; fall short and you eat a second loss. It halves the damage a brutal schedule can do, because half your games are against the same opponent as everyone else. ▲ and ▼ show how many places you'd move against the real table${rows.some(r => r.cmb_t) ? "; a tie only happens when a score lands exactly on the median" : ""}.</p>
+  <p class="note" style="margin-top:8px"><b>Career finish</b> is a manager's average finishing position across every season they've played, rescaled so the 8-, 10-, 12-, and 14-team eras compare fairly: <b>100%</b> = won the title, <b>0%</b> = finished last, <b>50%</b> = dead middle of the pack. Finishing 3rd of 12 scores 82%; 3rd of 8 scores 71% — same trophy shelf, different degree of difficulty. The Titles and “${prevY} finish” columns are single facts — how many rings, where you ended last year. Career finish is the average of every year. Rookies have no history yet.</p>
   <p class="note" style="margin-top:8px"><b>Luck</b> compares your real record to your <b>all-play</b> record — what you'd be if you played every team every week. Post the 3rd-best score of 14 and you go 11-2 in all-play that week whether your actual opponent beat you or not. Scale that to real games and you get the wins your scores <em>deserved</em>; Luck is actual wins minus deserved wins. <b>+2.0</b> means the schedule handed you two wins your scoring didn't earn; <b>−2.0</b> means you kept drawing the week's hottest team. It's the difference between a good team and a good draw.</p>
   ${weekLog.length ? `<h2>Weekly punishment log <span class="dim small">lowest score each week</span></h2>
   <div class="tablewrap"><table><thead><tr><th class="num">Week</th><th>🧊 Lowest scorer</th><th class="num">Pts</th><th>✦ Top scorer</th><th class="num">Pts</th></tr></thead>
@@ -891,6 +898,34 @@ const runnerUpLosses = () => {
 
 // One season's bad-beat block: the biggest losing score, plus who kept drawing
 // the week's hottest team. Shared by the season pages and This Season.
+// Record against the week's median score: a second game every week against
+// the middle of the league, the way some leagues run it. Above the median is a
+// win, below is a loss; with an even number of teams the median is the mean of
+// the two middle scores, so a tie is only possible when they match exactly.
+const medianRecords = y => {
+  const s = L.seasons[y];
+  const out = {};
+  for (const tid of Object.keys(s.teams)) out[tid] = {med_w: 0, med_l: 0, med_t: 0};
+  const byW = {};
+  for (const m of s.matchups) (byW[m.w] = byW[m.w] || []).push([m.a, m.as], [m.b, m.bs]);
+  for (const arr of Object.values(byW)) {
+    const sc = arr.map(x => x[1]).sort((a, b) => a - b), n = sc.length;
+    const med = n % 2 ? sc[(n - 1) / 2] : (sc[n / 2 - 1] + sc[n / 2]) / 2;
+    for (const [tid, v] of arr) {
+      const r = out[tid]; if (!r) continue;
+      if (v > med) r.med_w++; else if (v < med) r.med_l++; else r.med_t++;
+    }
+  }
+  for (const tid of Object.keys(out)) {
+    const r = out[tid], g = s.reg[tid];
+    r.cmb_w = g.w + r.med_w; r.cmb_l = g.l + r.med_l; r.cmb_t = g.t + r.med_t;
+    r.cmb_pct = (r.cmb_w + 0.5 * r.cmb_t) / Math.max(r.cmb_w + r.cmb_l + r.cmb_t, 1);
+  }
+  const order = Object.keys(out).sort((a, b) => out[b].cmb_pct - out[a].cmb_pct || s.reg[b].pf - s.reg[a].pf);
+  order.forEach((tid, i) => out[tid].cmb_rank = i + 1);
+  return out;
+};
+
 function hardLuckHTML(y) {
   const s = L.seasons[y];
   if (!s || !s.matchups.length) return "";
