@@ -428,35 +428,49 @@ views.now = () => {
   const playoffTeams = s.settings.playoff_teams || 6;
   const avgPts = played ? s.season_mean_score : (L.seasons[prevY]?.season_mean_score || 115);
   const projMap = s.projections?.by_tid || {};
+  const projWeek = s.projections?.week ?? null;
   const haveProj = Object.keys(projMap).length >= teamsArr.length - 1;
-  const prior = tid => {
-    if (haveProj && projMap[tid]) return projMap[tid];
+  // Yahoo's projection describes ONE week, byes and injuries included, so it is
+  // used for that week's game only. Applying it to the whole rest of the season
+  // once made a team averaging 117 look like a 74-point team for seven weeks
+  // because its stars happened to share a bye.
+  const resumePrior = tid => {
     const fq = finishQuality(mgrOfTeam(y, tid));
     return avgPts * (1 + 0.15 * ((fq == null ? 50 : fq) - 50) / 100);
   };
-  const mu = {};
+  const seasonMu = {};
   teamsArr.forEach(tid => {
     const g = s.reg[tid].w + s.reg[tid].l + s.reg[tid].t;
-    mu[tid] = (g * s.reg[tid].ppg + 4 * prior(tid)) / (g + 4);
+    // before any games, the opening-week roster projection is the best guide
+    // (no byes in week 1); once results exist, real scoring regressed toward
+    // the league average takes over
+    const base = g === 0 ? (haveProj && projMap[tid] ? projMap[tid] : resumePrior(tid)) : avgPts;
+    seasonMu[tid] = (g * s.reg[tid].ppg + 4 * base) / (g + 4);
   });
+  const gameMu = (tid, wk) => (haveProj && wk === projWeek && projMap[tid]) ? projMap[tid] : seasonMu[tid];
   const sigma = 0.22 * avgPts;
-  const erf = x => {
-    const t = 1 / (1 + 0.3275911 * Math.abs(x));
-    const v = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
-    return x >= 0 ? v : -v;
+  const gauss = () => {
+    let u = 0, v = 0;
+    while (!u) u = Math.random();
+    while (!v) v = Math.random();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
   };
-  const winProb = (a, b) => 0.5 * (1 + erf((mu[a] - mu[b]) / (sigma * Math.SQRT2) / Math.SQRT2));
   const remaining = sched.filter(g => g.w > (latest || 0));
   const SIMS = 1500;
   const tally = {};
   teamsArr.forEach(t => tally[t] = {po: 0, seed: Array(playoffTeams).fill(0), last: 0, wins: 0});
   for (let i = 0; i < SIMS; i++) {
-    const w = {};
-    teamsArr.forEach(t => w[t] = s.reg[t].w + 0.5 * s.reg[t].t);
+    // simulate actual scores rather than coin flips, so ties in the standings
+    // break on points for, exactly the way Yahoo breaks them
+    const w = {}, pf = {};
+    teamsArr.forEach(t => { w[t] = s.reg[t].w + 0.5 * s.reg[t].t; pf[t] = s.reg[t].pf; });
     for (const g of remaining) {
-      if (Math.random() < winProb(g.a, g.b)) w[g.a]++; else w[g.b]++;
+      const sa = gameMu(g.a, g.w) + sigma * gauss();
+      const sb = gameMu(g.b, g.w) + sigma * gauss();
+      pf[g.a] += sa; pf[g.b] += sb;
+      if (sa > sb) w[g.a]++; else w[g.b]++;
     }
-    const order = [...teamsArr].sort((a, b) => w[b] - w[a] || mu[b] - mu[a] || Math.random() - 0.5);
+    const order = [...teamsArr].sort((a, b) => w[b] - w[a] || pf[b] - pf[a]);
     order.slice(0, playoffTeams).forEach((t, k) => { tally[t].po++; tally[t].seed[k]++; });
     tally[order[order.length - 1]].last++;
     teamsArr.forEach(t => tally[t].wins += w[t]);
@@ -584,7 +598,9 @@ views.now = () => {
   <tbody>${weekLog.map(e => `<tr><td class="num">${e.w}</td><td>${esc(e.low.team)} <span class="dim small">${mdisp(e.low.mk)}</span></td><td class="num neg">${num(e.low.score)}</td><td>${esc(e.top.team)} <span class="dim small">${mdisp(e.top.mk)}</span></td><td class="num pos">${num(e.top.score)}</td></tr>`).join("")}</tbody></table></div>` : ""}
   ${played ? hardLuckHTML(y) : ""}
   <h2>Playoff odds <span class="dim small">projected</span></h2>
-  <p class="sub">${SIMS.toLocaleString()} simulated finishes of the remaining ${remaining.length} regular-season games. Team strength = ${haveProj ? `Yahoo's current roster projections (week ${s.projections.week ?? "?"})` : "each manager's career résumé"} blended with this season's actual scoring, which takes over as results accumulate. ${played >= 2 ? "" : "These firm up meaningfully once about two weeks are in the books."}</p>
+  <p class="sub">${SIMS.toLocaleString()} simulated finishes of the remaining ${remaining.length} regular-season games, each one played out score by score so ties break on points for, the way Yahoo breaks them. ${played
+    ? `Team strength is this season's actual scoring, pulled toward the league average while samples are small.${haveProj ? ` Yahoo's roster projections are used for week ${projWeek} only, since they price in that week's byes and injuries and say nothing about the weeks after.` : ""}`
+    : `Before any games, team strength comes from ${haveProj ? "Yahoo's opening-week roster projections" : "each manager's career résumé"}.`} ${played >= 2 ? "" : "These firm up meaningfully once about two weeks are in the books."}</p>
   ${table(projCols, projRows, {sortCol: 2, sortDir: -1})}
   ${bumpChart}
 
