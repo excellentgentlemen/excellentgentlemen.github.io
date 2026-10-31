@@ -979,10 +979,9 @@ function guillotineHTML(y) {
     {h: "Closest call", num: 1, val: r => r.close ? r.close.m : 999, fmt: r => r.close ? `<span class="${r.close.m < 5 ? "neg" : ""}">${num(r.close.m)} pts</span> <span class="dim small">wk ${r.close.w}</span>` : "—"},
   ], survivors, {sortCol: 4, sortDir: 1})}`}
   <h3>The chopping block</h3>
-  <div class="tablewrap"><table><thead><tr><th class="num">Week</th><th>Cut</th><th class="num">Pts</th><th class="num">Short by</th><th>Notes</th></tr></thead>
+  <div class="tablewrap"><table><thead><tr><th class="num">Week</th><th>Cut</th><th class="num">Pts</th><th class="num">Short by</th></tr></thead>
   <tbody>${cuts.map(c => `<tr><td class="num">${c.w}</td><td>${esc(teamOf(y, c.tid))} <span class="dim small">${mdisp(mgrOfTeam(y, c.tid))}</span></td>
-    <td class="num neg">${num(c.sc)}</td><td class="num">${num(c.by)}</td>
-    <td class="small dim">${c.by === 0 ? `tied with ${esc(teamOf(y, c.next))}, cut on season points` : `survived by ${esc(teamOf(y, c.next))}`}${c.worst ? `; week's actual low was ${esc(teamOf(y, c.worst[0]))} (${num(c.worst[1])}), already gone` : ""}</td></tr>`).join("")}</tbody></table></div>
+    <td class="num neg">${num(c.sc)}</td><td class="num">${num(c.by)}</td></tr>`).join("")}</tbody></table></div>
   <p class="legend"><span>“Short by” = points behind the next-lowest survivor that week.</span><span>“Closest call” = a survivor's smallest margin over the team cut that week.</span></p>`;
 }
 
