@@ -683,6 +683,7 @@ views.now = () => {
   <div class="tablewrap"><table><thead><tr><th class="num">Week</th><th>🧊 Lowest scorer</th><th class="num">Pts</th><th>✦ Top scorer</th><th class="num">Pts</th></tr></thead>
   <tbody>${weekLog.map(e => `<tr><td class="num">${e.w}</td><td>${esc(e.low.team)} <span class="dim small">${mdisp(e.low.mk)}</span></td><td class="num neg">${num(e.low.score)}</td><td>${esc(e.top.team)} <span class="dim small">${mdisp(e.top.mk)}</span></td><td class="num pos">${num(e.top.score)}</td></tr>`).join("")}</tbody></table></div>` : ""}
   ${played ? hardLuckHTML(y) : ""}
+  ${played ? guillotineHTML(y) : ""}
   <h2>Playoff odds <span class="dim small">projected</span></h2>
   <p class="sub">${SIMS.toLocaleString()} simulated finishes of the remaining ${remaining.length} regular-season games, each played out score by score so tied records break on points for, the way Yahoo breaks them. Team strength is simply each team's average score this season — no projections, byes or injuries. On top of that the simulation carries three kinds of uncertainty, each measured from this league's own history: weekly swings, doubt about how good a team really is after only a few games, and teams genuinely getting better or worse as the season goes on. ${played ? "" : "With no games played yet, every team starts equal."} ${played >= 2 ? "" : "These firm up meaningfully once about two weeks are in the books."}</p>
   ${table(projCols, projRows, {sortCol: 2, sortDir: -1})}
@@ -925,6 +926,65 @@ const medianRecords = y => {
   order.forEach((tid, i) => out[tid].cmb_rank = i + 1);
   return out;
 };
+
+// Guillotine: every completed week the lowest score among the teams still
+// standing is cut. A team that is already gone can post the week's worst
+// score without saving anyone; the blade falls on the lowest survivor. A tie
+// for lowest survivor cuts the team with fewer season points to that date.
+function guillotineHTML(y) {
+  const s = L.seasons[y];
+  const byW = {};
+  for (const m of s.matchups) (byW[m.w] = byW[m.w] || []).push([m.a, m.as], [m.b, m.bs]);
+  const weeks = Object.keys(byW).map(Number).sort((a, b) => a - b);
+  if (!weeks.length) return "";
+  const alive = new Set(Object.keys(s.teams));
+  const cum = {}, cutWeek = {}, closest = {}, cuts = [];
+  for (const t of alive) cum[t] = 0;
+  for (const w of weeks) {
+    const arr = byW[w];
+    for (const [t, v] of arr) cum[t] = (cum[t] || 0) + v;
+    if (alive.size <= 1) continue;
+    const live = arr.filter(([t]) => alive.has(t)).sort((a, b) => a[1] - b[1] || cum[a[0]] - cum[b[0]]);
+    if (live.length < 2) continue;
+    const [tid, sc] = live[0], next = live[1];
+    const worst = [...arr].sort((a, b) => a[1] - b[1])[0];
+    cuts.push({w, tid, sc, by: next[1] - sc, next: next[0], worst: worst[0] !== tid ? worst : null});
+    alive.delete(tid); cutWeek[tid] = w;
+    for (const [t, v] of live.slice(1)) {
+      const m = v - sc;
+      if (!closest[t] || m < closest[t].m) closest[t] = {m, w};
+    }
+  }
+  const survivors = [...alive].map(tid => ({tid, mk: mgrOfTeam(y, tid), ...s.reg[tid], close: closest[tid] || null}));
+  const champ = survivors.length === 1 ? survivors[0] : null;
+  const order = Object.keys(s.teams).sort((a, b) => (cutWeek[b] || 99) - (cutWeek[a] || 99) || s.reg[b].pf - s.reg[a].pf);
+  const lastCut = cuts[cuts.length - 1];
+  return `
+  <h2>The guillotine <span class="dim small">${y}, if the lowest survivor were cut every week</span></h2>
+  <p class="sub">A what-if: run this season as a guillotine league. Every week the lowest score among the teams still standing is eliminated for good. Post the week's worst score after you're already gone and it saves nobody: the blade falls on the lowest of the survivors instead.</p>
+  <div class="statrow">
+    ${champ ? `<div class="stat gold"><div class="v">🏆 ${esc(teamOf(y, champ.tid))}</div><div class="l">Last team standing — ${mdisp(champ.mk)}</div></div>`
+      : `<div class="stat green"><div class="v num">${survivors.length} of ${order.length}</div><div class="l">Still standing after week ${weeks[weeks.length - 1]}</div></div>`}
+    ${lastCut ? `<div class="stat"><div class="v">${esc(teamOf(y, lastCut.tid))}</div><div class="l">Latest to go — week ${lastCut.w}, ${num(lastCut.sc)} pts, ${num(lastCut.by)} short of ${esc(teamOf(y, lastCut.next))}</div></div>` : ""}
+  </div>
+  <p class="chips" style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px">${order.map(tid => cutWeek[tid]
+    ? `<span class="chip neg" style="opacity:.75"><s>${esc(teamOf(y, tid))}</s> · wk ${cutWeek[tid]}</span>`
+    : `<span class="chip ${champ ? "gold" : "pos"}"><b>${esc(teamOf(y, tid))}</b></span>`).join("")}</p>
+  ${champ ? "" : `<h3>Still standing</h3>
+  ${table([
+    {h: "Team", val: r => teamOf(y, r.tid), fmt: r => `<b>${esc(teamOf(y, r.tid))}</b>`},
+    {h: "Manager", val: r => mname(r.mk), fmt: r => mlink(r.mk)},
+    {h: "Real W-L", num: 1, val: r => r.w + 0.5 * r.t, fmt: r => `<span class="num">${rec(r.w, r.l, r.t)}</span>`},
+    {h: "PPG", num: 1, val: r => r.ppg, fmt: r => num(r.ppg)},
+    {h: "Closest call", num: 1, val: r => r.close ? r.close.m : 999, fmt: r => r.close ? `<span class="${r.close.m < 5 ? "neg" : ""}">${num(r.close.m)} pts</span> <span class="dim small">wk ${r.close.w}</span>` : "—"},
+  ], survivors, {sortCol: 4, sortDir: 1})}`}
+  <h3>The chopping block</h3>
+  <div class="tablewrap"><table><thead><tr><th class="num">Week</th><th>Cut</th><th class="num">Pts</th><th class="num">Short by</th><th>Notes</th></tr></thead>
+  <tbody>${cuts.map(c => `<tr><td class="num">${c.w}</td><td>${esc(teamOf(y, c.tid))} <span class="dim small">${mdisp(mgrOfTeam(y, c.tid))}</span></td>
+    <td class="num neg">${num(c.sc)}</td><td class="num">${num(c.by)}</td>
+    <td class="small dim">${c.by === 0 ? `tied with ${esc(teamOf(y, c.next))}, cut on season points` : `survived by ${esc(teamOf(y, c.next))}`}${c.worst ? `; week's actual low was ${esc(teamOf(y, c.worst[0]))} (${num(c.worst[1])}), already gone` : ""}</td></tr>`).join("")}</tbody></table></div>
+  <p class="legend"><span>“Short by” = points behind the next-lowest survivor that week.</span><span>“Closest call” = a survivor's smallest margin over the team cut that week.</span></p>`;
+}
 
 function hardLuckHTML(y) {
   const s = L.seasons[y];
