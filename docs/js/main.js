@@ -679,6 +679,7 @@ views.now = () => {
   <p class="note" style="margin-top:10px"><b>W-L + median</b> is the standings under a two-games-a-week format: your real matchup plus a game against the median score of the whole league that week. Beat the median and you bank a second win; fall short and you eat a second loss. It halves the damage a brutal schedule can do, because half your games are against the same opponent as everyone else. ▲ and ▼ show how many places you'd move against the real table${rows.some(r => r.cmb_t) ? "; a tie only happens when a score lands exactly on the median" : ""}.</p>
   <p class="note" style="margin-top:8px"><b>Career finish</b> is a manager's average finishing position across every season they've played, rescaled so the 8-, 10-, 12-, and 14-team eras compare fairly: <b>100%</b> = won the title, <b>0%</b> = finished last, <b>50%</b> = dead middle of the pack. Finishing 3rd of 12 scores 82%; 3rd of 8 scores 71% — same trophy shelf, different degree of difficulty. The Titles and “${prevY} finish” columns are single facts — how many rings, where you ended last year. Career finish is the average of every year. Rookies have no history yet.</p>
   <p class="note" style="margin-top:8px"><b>Luck</b> compares your real record to your <b>all-play</b> record — what you'd be if you played every team every week. Post the 3rd-best score of 14 and you go 11-2 in all-play that week whether your actual opponent beat you or not. Scale that to real games and you get the wins your scores <em>deserved</em>; Luck is actual wins minus deserved wins. <b>+2.0</b> means the schedule handed you two wins your scoring didn't earn; <b>−2.0</b> means you kept drawing the week's hottest team. It's the difference between a good team and a good draw.</p>
+  ${played ? divisionHTML(y) : ""}
   ${weekLog.length ? `<h2>Weekly punishment log <span class="dim small">lowest score each week</span></h2>
   <div class="tablewrap"><table><thead><tr><th class="num">Week</th><th>🧊 Lowest scorer</th><th class="num">Pts</th><th>✦ Top scorer</th><th class="num">Pts</th></tr></thead>
   <tbody>${weekLog.map(e => `<tr><td class="num">${e.w}</td><td>${esc(e.low.team)} <span class="dim small">${mdisp(e.low.mk)}</span></td><td class="num neg">${num(e.low.score)}</td><td>${esc(e.top.team)} <span class="dim small">${mdisp(e.top.mk)}</span></td><td class="num pos">${num(e.top.score)}</td></tr>`).join("")}</tbody></table></div>` : ""}
@@ -815,6 +816,8 @@ views.season = (y) => {
   ${table(cols, rows, {sortCol: 0, sortDir: 1})}
   <p class="legend"><span>“vs mean” = points per game relative to the league average that season (100% = average).</span>
   <span>“Luck” = wins minus deserved wins from the all-play record.</span></p>
+
+  ${divisionHTML(y)}
 
   ${s.weeks.length ? `<h2 class="section-head">Weekly scores <span class="spacer"></span>
     <select id="wkSel" class="ctl">${weekOpts}</select></h2>
@@ -983,6 +986,54 @@ function guillotineHTML(y) {
   <tbody>${cuts.map(c => `<tr><td class="num">${c.w}</td><td>${esc(teamOf(y, c.tid))} <span class="dim small">${mdisp(mgrOfTeam(y, c.tid))}</span></td>
     <td class="num neg">${num(c.sc)}</td><td class="num">${num(c.by)}</td></tr>`).join("")}</tbody></table></div>
   <p class="legend"><span>“Short by” = points behind the next-lowest survivor that week.</span><span>“Closest call” = a survivor's smallest margin over the team cut that week.</span></p>`;
+}
+
+// Division vs division: every regular-season game between two divisions,
+// tallied from each side. Games inside a division don't count toward it.
+function divisionHTML(y) {
+  const s = L.seasons[y];
+  const divOf = tid => s.standings[tid]?.division;
+  const divs = [...new Set(Object.keys(s.teams).map(divOf).filter(Boolean))];
+  if (divs.length < 2 || !s.matchups.length) return "";
+  const cell = {}, tot = {}, intra = {};
+  for (const d of divs) {
+    tot[d] = {w: 0, l: 0, t: 0, pf: 0, pa: 0, g: 0, teams: Object.keys(s.teams).filter(t => divOf(t) === d).length};
+    intra[d] = 0;
+    for (const e of divs) cell[d + "|" + e] = {w: 0, l: 0, t: 0};
+  }
+  for (const m of s.matchups) {
+    const da = divOf(m.a), db = divOf(m.b);
+    if (!da || !db) continue;
+    if (da === db) { intra[da]++; continue; }
+    for (const [d, e, f, g] of [[da, db, m.as, m.bs], [db, da, m.bs, m.as]]) {
+      const c = cell[d + "|" + e], T = tot[d];
+      const k = f > g ? "w" : f < g ? "l" : "t";
+      c[k]++; T[k]++; T.pf += f; T.pa += g; T.g++;
+    }
+  }
+  const pct = r => (r.w + 0.5 * r.t) / Math.max(r.w + r.l + r.t, 1);
+  // best division first, and the columns follow the same order as the rows
+  const rows = divs.map(d => ({d, ...tot[d], pct: pct(tot[d])})).sort((a, b) => b.pct - a.pct || b.pf - a.pf);
+  divs.splice(0, divs.length, ...rows.map(r => r.d));
+  const top = rows.filter(r => r.g && r.pct === rows[0].pct);
+  const brag = !top.length ? "" : top.length > 1
+    ? ` ${top.map(r => `<b>${esc(r.d)}</b>`).join(" and ")} ${s.in_progress ? "are" : "finished"} level at ${rec(top[0].w, top[0].l, top[0].t)} against the rest of the league.`
+    : ` Bragging rights${s.in_progress ? " right now" : ""}: <b>${esc(top[0].d)}</b>, ${rec(top[0].w, top[0].l, top[0].t)} against the rest of the league.`;
+  return `
+  <h2>Division vs division <span class="dim small">${y}${s.in_progress ? " so far" : ""}</span></h2>
+  <p class="sub">Every game played across division lines, counted from each side. Games inside a division are left out, since one team's win there is a division-mate's loss.${brag}</p>
+  ${table([
+    {h: "Division", val: r => r.d, fmt: r => `<b>${esc(r.d)}</b> <span class="dim small">${r.teams} teams</span>`},
+    ...divs.map(e => ({h: "vs " + e, num: 1, val: r => r.d === e ? -1 : pct(cell[r.d + "|" + e]), fmt: r => {
+      if (r.d === e) return `<span class="dim small">${intra[e]} in-div games</span>`;
+      const c = cell[r.d + "|" + e], n = c.w + c.l + c.t;
+      return n ? `<span class="num ${c.w > c.l ? "pos" : c.w < c.l ? "neg" : ""}">${rec(c.w, c.l, c.t)}</span>` : `<span class="dim">—</span>`;
+    }})),
+    {h: "vs everyone else", num: 1, val: r => r.pct, fmt: r => `<b class="num">${rec(r.w, r.l, r.t)}</b> <span class="dim small">${r.g ? (100 * r.pct).toFixed(0) + "%" : ""}</span>`},
+    {h: "Pts/g", num: 1, val: r => r.g ? r.pf / r.g : 0, fmt: r => r.g ? num(r.pf / r.g) : "—"},
+    {h: "Allowed/g", num: 1, val: r => r.g ? r.pa / r.g : 0, fmt: r => r.g ? num(r.pa / r.g) : "—"},
+  ], rows)}
+  <p class="legend"><span>Read across: each row is that division's record against the column's division.</span><span>Pts/g and Allowed/g cover cross-division games only.</span></p>`;
 }
 
 function hardLuckHTML(y) {
