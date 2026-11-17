@@ -288,6 +288,21 @@ def parse_draft_value(S, draft, teams):
     return {"rows": rows, "scored": scored, "n": len(rows), "replacement": {k: round(v, 2) for k, v in repl.items()}}
 
 
+def parse_rosters(S, byname):
+    """Current rosters from the player list: tid -> [[pos, pos_rank, name, pts, gp], ...].
+    pos_rank is the player's rank at his position on season fantasy points."""
+    raw = S.get("rosters") or {}
+    out = {}
+    for team, players in raw.items():
+        tid = byname.get(norm(team))
+        if not tid:
+            warn(f"roster team unmapped: {team}")
+            continue
+        out[tid] = sorted(([p[0], int(p[1]), p[2], round(float(p[3] or 0), 2), int(p[4] or 0)] for p in players),
+                          key=lambda p: (p[0], p[1]))
+    return out or None
+
+
 def parse_projections(S, byname):
     """Yahoo's roster-based weekly projections from the live league page -> {week, by_tid}."""
     raw = S.get("projections") or {}
@@ -529,6 +544,7 @@ def build():
             "projections": (None if (S.get("live_week") or {}).get("complete")
                             else parse_projections(S, byname)),
             "draft_value": parse_draft_value(S, draft, teams),
+            "rosters": parse_rosters(S, byname),
         }
 
     # ---- manager registry ------------------------------------------------

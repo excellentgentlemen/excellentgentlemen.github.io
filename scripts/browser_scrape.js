@@ -147,12 +147,31 @@ window.__egl = window.__egl || {data: {}};
         (S.waiver_top[v.pos] = S.waiver_top[v.pos] || []).push({n: v.n, pts: v.pts});
       }
       for (const p in S.waiver_top) S.waiver_top[p] = S.waiver_top[p].sort((a, b) => b.pts - a.pts).slice(0, 5);
+      // Current rosters, every player tagged with his positional rank on season
+      // fantasy points (1 + players at that position who scored more). The "ALL"
+      // list stops a few hundred deep, so a second pass over rostered-only players
+      // picks up stashed / injured guys who sit below that cut.
+      try {
+        const pool = Object.assign({}, all);
+        const taken = await window.__egl.playerStats(base, year, 400, "T");
+        for (const [k, v] of Object.entries(taken)) if (!pool[k]) pool[k] = v;
+        const teamNames = new Set((S.teams || []).map(t => t[1]));
+        const byPos = {};
+        for (const v of Object.values(pool)) if (v.pos) (byPos[v.pos] = byPos[v.pos] || []).push(v.pts);
+        S.rosters = {};
+        for (const v of Object.values(pool)) {
+          if (!v.pos || !teamNames.has(v.own)) continue;
+          const rank = 1 + byPos[v.pos].filter(x => x > v.pts).length;
+          (S.rosters[v.own] = S.rosters[v.own] || []).push([v.pos, rank, v.n, v.pts, v.gp]);
+        }
+      } catch (e) { S.rosters = null; }
     } catch (e) { S.player_stats = null; S.waiver_top = null; }
     window.__egl.data[year] = S;
     try { sessionStorage.setItem("EGL_" + year, JSON.stringify(S)); } catch (e) {}
     return "OK " + year + " base=" + base + " standings=" + (S.standings ? S.standings.r.length : 0) +
       " draft=" + S.draft.length + " teams=" + (S.teams ? S.teams.length : 0) + " sched=" + Object.keys(S.schedules).length +
-      " bracket=" + (S.bracket_text ? 1 : 0) + " players=" + (S.player_stats ? Object.keys(S.player_stats).length : 0);
+      " bracket=" + (S.bracket_text ? 1 : 0) + " players=" + (S.player_stats ? Object.keys(S.player_stats).length : 0) +
+      " rostered=" + (S.rosters ? Object.values(S.rosters).reduce((a, r) => a + r.length, 0) : 0);
   };
 
   // Parse "Team / record / live / projected vs live / projected / Team / record" blocks from the
@@ -199,24 +218,28 @@ window.__egl = window.__egl || {data: {}};
   // cell is not at a fixed index. Find it from the last header row instead: the
   // body has a couple of leading cells (checkbox, note) with no matching th, so
   // the offset is simply (cells - headers).
-  const fanPtsCol = (table) => {
+  const colOf = (table, name) => {
     const hrows = Array.from(table.querySelectorAll("thead tr"));
     const last = hrows[hrows.length - 1];
     const body = table.querySelector("tbody tr");
     if (!last || !body) return null;
     const ths = Array.from(last.querySelectorAll("th")).map(x => x.textContent.trim().replace(/\s+/g, " "));
-    const i = ths.indexOf("Fan Pts");
+    const i = ths.indexOf(name);
     if (i < 0) return null;
     return i + (body.querySelectorAll("td").length - ths.length);
   };
+  const fanPtsCol = (table) => colOf(table, "Fan Pts");
 
-  window.__egl.playerStats = async (base, year, maxOff) => {
+  // status "ALL" = every player; "T" = only players on a fantasy roster.
+  // Each entry also carries "own" (the "Roster Status" cell: a fantasy team name,
+  // "FA" or "W (date)") and "gp" (games played).
+  window.__egl.playerStats = async (base, year, maxOff, status = "ALL") => {
     const sleep = ms => new Promise(z => setTimeout(z, ms));
     const out = {};
     const grab = async (pos, last) => {
-      let col = null;
+      let col = null, ownCol = null, gpCol = null;
       for (let c = 0; c <= last; c += 25) {
-        const url = `${base}/players?status=ALL&pos=${pos}&stat1=S_S_${year}&sort=PR&sdir=1&count=${c}`;
+        const url = `${base}/players?status=${status}&pos=${pos}&stat1=S_S_${year}&sort=PR&sdir=1&count=${c}`;
         let d;
         try {
           const r = await fetch(url, {credentials: "same-origin"});
@@ -224,7 +247,7 @@ window.__egl = window.__egl || {data: {}};
         } catch (e) { break; }
         const table = d.querySelector("table");
         if (!table) break;
-        if (col === null) col = fanPtsCol(table);
+        if (col === null) { col = fanPtsCol(table); ownCol = colOf(table, "Roster Status"); gpCol = colOf(table, "GP*"); }
         if (col === null) break;
         const trs = table.querySelectorAll("tbody tr");
         if (!trs.length) break;
@@ -244,7 +267,8 @@ window.__egl = window.__egl || {data: {}};
             if (nm && !/^(Who is|Only |Any )/.test(nm)) key = "DEF:" + nm;
           }
           if (!key) continue;
-          out[key] = {n: nm, pts: parseFloat(td[col]) || 0, pos: ppos};
+          out[key] = {n: nm, pts: parseFloat(td[col]) || 0, pos: ppos,
+            own: ownCol === null ? null : td[ownCol], gp: gpCol === null ? null : (parseInt(td[gpCol], 10) || 0)};
         }
         await sleep(250);
       }

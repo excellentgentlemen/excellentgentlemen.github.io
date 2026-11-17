@@ -702,6 +702,7 @@ views.now = () => {
   <p class="sub">${SIMS.toLocaleString()} simulated finishes of the remaining ${remaining.length} regular-season games, each played out score by score so tied records break on points for, the way Yahoo breaks them. Team strength is simply each team's average score this season — no projections, byes or injuries. On top of that the simulation carries three kinds of uncertainty, each measured from this league's own history: weekly swings, doubt about how good a team really is after only a few games, and teams genuinely getting better or worse as the season goes on. ${played ? "" : "With no games played yet, every team starts equal."} ${played >= 2 ? "" : "These firm up meaningfully once about two weeks are in the books."}</p>
   ${table(projCols, projRows, {sortCol: 3, sortDir: -1})}
   ${played && s.in_progress ? projectedBracketHTML(y, Object.fromEntries(projRows.map(r => [r.tid, r.settled.out ? 0 : r.settled.clinched ? 100 : r.po]))) : ""}
+  ${played ? rosterHTML(y) : ""}
   ${bumpChart}
 
   ${(() => {
@@ -781,6 +782,60 @@ function bracketHTML(y) {
       `<div><div class="round-title" style="font-size:10.5px;margin-bottom:3px">${esc(g.round)}</div>${side(g)}</div>`).join("")}</div>`);
   }
   return `<div class="bracket">${cols.join("")}</div>`;
+}
+
+// Roster rankings: every team's best player at each starting slot, shown as
+// his positional rank on season fantasy points (RB4, WR17...). Not who actually
+// started — byes shuffle that — just the best the roster has at each spot.
+// FLEX is the best RB/WR/TE left over. Rosters ranked by the season points of
+// those ten players.
+function rosterHTML(y) {
+  const s = L.seasons[y];
+  const R = s.rosters;
+  if (!R) return "";
+  const slots = [["QB", "QB"], ["RB1", "RB"], ["RB2", "RB"], ["WR1", "WR"], ["WR2", "WR"], ["WR3", "WR"],
+    ["TE", "TE"], ["FLEX", null], ["DEF", "DEF"], ["K", "K"]];
+  const rows = Object.keys(s.teams).filter(t => R[t]).map(tid => {
+    const left = R[tid].map(([pos, rank, n, pts, gp]) => ({pos, rank, n, pts, gp})).sort((a, b) => b.pts - a.pts || a.rank - b.rank);
+    const take = pos => {
+      const i = left.findIndex(p => pos ? p.pos === pos : ["RB", "WR", "TE"].includes(p.pos));
+      return i < 0 ? null : left.splice(i, 1)[0];
+    };
+    const got = {};
+    for (const [slot, pos] of slots) if (pos) got[slot] = take(pos);
+    got.FLEX = take(null);          // filled last, from whatever is left
+    const total = slots.reduce((a, [k]) => a + (got[k] ? got[k].pts : 0), 0);
+    return {tid, got, total, bench: left};
+  });
+  if (!rows.length) return "";
+  // within each column: the three best and three worst slots get a tint
+  const tint = {};
+  for (const [k] of slots) {
+    const v = rows.map(r => r.got[k] ? r.got[k].pts : -1).sort((a, b) => b - a);
+    for (const r of rows) {
+      const x = r.got[k] ? r.got[k].pts : -1;
+      tint[r.tid + k] = x >= v[2] ? "pos" : x <= v[v.length - 3] ? "neg" : "plain";
+    }
+  }
+  [...rows].sort((a, b) => b.total - a.total).forEach((r, i) => r.rank = i + 1);
+  const wk = Math.max(0, ...s.matchups.map(m => m.w));
+  const cell = (r, k) => {
+    const p = r.got[k];
+    if (!p) return `<span class="dim">—</span>`;
+    return `<span class="chip ${tint[r.tid + k]}" title="${esc(p.n)} · ${num(p.pts)} pts · ${p.gp} GP">${p.pos}${p.rank}</span>`;
+  };
+  const best = rows.find(r => r.rank === 1), worst = rows.find(r => r.rank === rows.length);
+  return `
+  <h2>Roster rankings <span class="dim small">best player at every slot${wk ? `, ranked through week ${wk}` : ""}</span></h2>
+  <p class="sub">Each team's top-ranked player at every starting spot, whoever actually started. The tag is his rank at his position on season fantasy points: RB4 is the fourth-highest-scoring running back in football. FLEX is the best RB, WR or TE left after the others are filled. Rosters are ranked by what those ten have scored. Hover a tag for the player. ${best && worst ? `Deepest on paper: <b>${esc(teamOf(y, best.tid))}</b>. Thinnest: <b>${esc(teamOf(y, worst.tid))}</b>.` : ""}</p>
+  ${table([
+    {h: "#", num: 1, val: r => -r.rank, fmt: r => `<b>${r.rank}</b>`},
+    {h: "Team", val: r => teamOf(y, r.tid), fmt: r => `${esc(teamOf(y, r.tid))} <span class="dim small">${mdisp(mgrOfTeam(y, r.tid))}</span>`},
+    {h: "Record", num: 1, val: r => s.reg[r.tid].w + 0.5 * s.reg[r.tid].t, fmt: r => `<span class="num">${rec(s.reg[r.tid].w, s.reg[r.tid].l, s.reg[r.tid].t)}</span>`},
+    ...slots.map(([k]) => ({h: k, num: 1, val: r => r.got[k] ? r.got[k].pts : -1, fmt: r => cell(r, k)})),
+    {h: "Pts", num: 1, val: r => r.total, fmt: r => `<b class="num">${num(r.total)}</b>`},
+  ], rows, {sortCol: 0, sortDir: -1})}
+  <p class="legend"><span><span class="chip pos">green</span> top three in that column</span><span><span class="chip neg">red</span> bottom three</span><span>“Pts” = season fantasy points of those ten players, so a guy who missed games ranks lower.</span></p>`;
 }
 
 // "If the playoffs started today": seeds straight from the current standings,
