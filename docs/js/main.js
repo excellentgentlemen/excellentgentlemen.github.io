@@ -701,7 +701,11 @@ views.now = () => {
   <h2>Playoff odds <span class="dim small">projected</span></h2>
   <p class="sub">${SIMS.toLocaleString()} simulated finishes of the remaining ${remaining.length} regular-season games, each played out score by score so tied records break on points for, the way Yahoo breaks them. Team strength is simply each team's average score this season — no projections, byes or injuries. On top of that the simulation carries three kinds of uncertainty, each measured from this league's own history: weekly swings, doubt about how good a team really is after only a few games, and teams genuinely getting better or worse as the season goes on. ${played ? "" : "With no games played yet, every team starts equal."} ${played >= 2 ? "" : "These firm up meaningfully once about two weeks are in the books."}</p>
   ${table(projCols, projRows, {sortCol: 3, sortDir: -1})}
-  ${played && s.in_progress ? projectedBracketHTML(y, Object.fromEntries(projRows.map(r => [r.tid, r.settled.out ? 0 : r.settled.clinched ? 100 : r.po]))) : ""}
+  ${(() => {
+    if (!played || !s.in_progress) return "";
+    const odds = Object.fromEntries(projRows.map(r => [r.tid, r.settled.out ? 0 : r.settled.clinched ? 100 : r.po]));
+    return projectedBracketHTML(y, odds) + projectedBracketHTML(y, odds, true);
+  })()}
   ${played ? rosterHTML(y) : ""}
   ${bumpChart}
 
@@ -787,67 +791,113 @@ function bracketHTML(y) {
 // Roster rankings: every team's best player at each starting slot, shown as
 // his positional rank on season fantasy points (RB4, WR17...). Not who actually
 // started — byes shuffle that — just the best the roster has at each spot.
-// FLEX is the best RB/WR/TE left over. Rosters ranked by the season points of
-// those ten players.
-function rosterHTML(y) {
-  const s = L.seasons[y];
-  const R = s.rosters;
-  if (!R) return "";
-  const slots = [["QB", "QB"], ["RB1", "RB"], ["RB2", "RB"], ["WR1", "WR"], ["WR2", "WR"], ["WR3", "WR"],
-    ["TE", "TE"], ["FLEX", null], ["DEF", "DEF"], ["K", "K"]];
-  const rows = Object.keys(s.teams).filter(t => R[t]).map(tid => {
+// FLEX is the best RB/WR/TE left over. Ranked by the average of those
+// positional ranks, or by any one position group via the pills.
+const ROSTER_SLOTS = [["QB", "QB"], ["RB1", "RB"], ["RB2", "RB"], ["WR1", "WR"], ["WR2", "WR"], ["WR3", "WR"],
+  ["TE", "TE"], ["FLEX", null], ["DEF", "DEF"], ["K", "K"]];
+const ROSTER_MODES = [
+  ["all", "All slots", null, "Avg rank"],
+  ["QB", "QB", ["QB"], "QB rank"],
+  ["RB", "2 RBs", ["RB1", "RB2"], "Avg RB rank"],
+  ["WR", "3 WRs", ["WR1", "WR2", "WR3"], "Avg WR rank"],
+  ["TE", "TE", ["TE"], "TE rank"],
+  ["FLEX", "FLEX", ["FLEX"], "FLEX rank"],
+  ["DEF", "DEF", ["DEF"], "DEF rank"],
+  ["K", "K", ["K"], "K rank"],
+  ["pts", "Season points", null, "Pts"],
+];
+let rosterMode = "all";
+const EMPTY_SLOT = 200;                          // an empty slot counts as rank 200
+function rosterRows(y) {
+  const s = L.seasons[y], R = s.rosters || {};
+  return Object.keys(s.teams).filter(t => R[t]).map(tid => {
     const left = R[tid].map(([pos, rank, n, pts, gp]) => ({pos, rank, n, pts, gp})).sort((a, b) => b.pts - a.pts || a.rank - b.rank);
     const take = pos => {
       const i = left.findIndex(p => pos ? p.pos === pos : ["RB", "WR", "TE"].includes(p.pos));
       return i < 0 ? null : left.splice(i, 1)[0];
     };
     const got = {};
-    for (const [slot, pos] of slots) if (pos) got[slot] = take(pos);
+    for (const [slot, pos] of ROSTER_SLOTS) if (pos) got[slot] = take(pos);
     got.FLEX = take(null);          // filled last, from whatever is left
-    const total = slots.reduce((a, [k]) => a + (got[k] ? got[k].pts : 0), 0);
-    return {tid, got, total, bench: left};
+    const rk = k => got[k] ? got[k].rank : EMPTY_SLOT;
+    const avg = keys => keys.reduce((a, k) => a + rk(k), 0) / keys.length;
+    const total = ROSTER_SLOTS.reduce((a, [k]) => a + (got[k] ? got[k].pts : 0), 0);
+    return {tid, got, total, avg, avgAll: avg(ROSTER_SLOTS.map(x => x[0]))};
   });
-  if (!rows.length) return "";
+}
+function rosterTableHTML(y) {
+  const s = L.seasons[y];
+  const mode = ROSTER_MODES.find(m => m[0] === rosterMode) || ROSTER_MODES[0];
+  const rows = rosterRows(y);
+  const keys = mode[2] || ROSTER_SLOTS.map(x => x[0]);
+  for (const r of rows) r.score = mode[0] === "pts" ? -r.total : r.avg(keys);
+  [...rows].sort((a, b) => a.score - b.score || b.total - a.total).forEach((r, i, arr) =>
+    r.rank = i && arr[i - 1].score === r.score && arr[i - 1].total === r.total ? arr[i - 1].rank : i + 1);
   // within each column: the three best and three worst slots get a tint
   const tint = {};
-  for (const [k] of slots) {
+  for (const [k] of ROSTER_SLOTS) {
     const v = rows.map(r => r.got[k] ? r.got[k].pts : -1).sort((a, b) => b - a);
     for (const r of rows) {
       const x = r.got[k] ? r.got[k].pts : -1;
       tint[r.tid + k] = x >= v[2] ? "pos" : x <= v[v.length - 3] ? "neg" : "plain";
     }
   }
-  [...rows].sort((a, b) => b.total - a.total).forEach((r, i) => r.rank = i + 1);
-  const wk = Math.max(0, ...s.matchups.map(m => m.w));
+  const inMode = k => mode[2] && mode[2].includes(k);
   const cell = (r, k) => {
     const p = r.got[k];
     if (!p) return `<span class="dim">—</span>`;
-    return `<span class="chip ${tint[r.tid + k]}" title="${esc(p.n)} · ${num(p.pts)} pts · ${p.gp} GP">${p.pos}${p.rank}</span>`;
+    const tag = `<span class="chip ${tint[r.tid + k]}" data-tip="${esc(p.n)} · ${num(p.pts)} pts in ${p.gp} games">${p.pos}${p.rank}</span>`;
+    return inMode(k) ? `<b style="outline:2px solid var(--accent);outline-offset:1px;border-radius:99px;display:inline-block">${tag}</b>` : tag;
   };
-  const best = rows.find(r => r.rank === 1), worst = rows.find(r => r.rank === rows.length);
-  return `
-  <h2>Roster rankings <span class="dim small">best player at every slot${wk ? `, ranked through week ${wk}` : ""}</span></h2>
-  <p class="sub">Each team's top-ranked player at every starting spot, whoever actually started. The tag is his rank at his position on season fantasy points: RB4 is the fourth-highest-scoring running back in football. FLEX is the best RB, WR or TE left after the others are filled. Rosters are ranked by what those ten have scored. Hover a tag for the player. ${best && worst ? `Deepest on paper: <b>${esc(teamOf(y, best.tid))}</b>. Thinnest: <b>${esc(teamOf(y, worst.tid))}</b>.` : ""}</p>
-  ${table([
+  const f1 = v => v >= EMPTY_SLOT ? "—" : (Math.round(v * 10) / 10).toFixed(Number.isInteger(v) ? 0 : 1);
+  const cols = [
     {h: "#", num: 1, val: r => -r.rank, fmt: r => `<b>${r.rank}</b>`},
     {h: "Team", val: r => teamOf(y, r.tid), fmt: r => `${esc(teamOf(y, r.tid))} <span class="dim small">${mdisp(mgrOfTeam(y, r.tid))}</span>`},
     {h: "Record", num: 1, val: r => s.reg[r.tid].w + 0.5 * s.reg[r.tid].t, fmt: r => `<span class="num">${rec(s.reg[r.tid].w, s.reg[r.tid].l, s.reg[r.tid].t)}</span>`},
-    ...slots.map(([k]) => ({h: k, num: 1, val: r => r.got[k] ? r.got[k].pts : -1, fmt: r => cell(r, k)})),
-    {h: "Pts", num: 1, val: r => r.total, fmt: r => `<b class="num">${num(r.total)}</b>`},
-  ], rows, {sortCol: 0, sortDir: -1})}
-  <p class="legend"><span><span class="chip pos">green</span> top three in that column</span><span><span class="chip neg">red</span> bottom three</span><span>“Pts” = season fantasy points of those ten players, so a guy who missed games ranks lower.</span></p>`;
+  ];
+  if (mode[2] && mode[2].length > 1) cols.push({h: mode[3], num: 1, val: r => -r.score, fmt: r => `<b class="num">${f1(r.score)}</b>`});
+  cols.push(...ROSTER_SLOTS.map(([k]) => ({h: k, num: 1, val: r => r.got[k] ? r.got[k].pts : -1, fmt: r => cell(r, k)})));
+  cols.push({h: "Avg rank", num: 1, val: r => -r.avgAll, fmt: r => mode[0] === "all" ? `<b class="num">${f1(r.avgAll)}</b>` : `<span class="num">${f1(r.avgAll)}</span>`});
+  cols.push({h: "Pts", num: 1, val: r => r.total, fmt: r => mode[0] === "pts" ? `<b class="num">${num(r.total)}</b>` : `<span class="num">${num(r.total)}</span>`});
+  return `<div class="pill-tabs"><span class="dim small" style="align-self:center">Rank by</span>${ROSTER_MODES.map(m =>
+    `<button class="${m[0] === mode[0] ? "on" : ""}" onclick="__rosterBy('${m[0]}')">${m[1]}</button>`).join("")}</div>
+  ${table(cols, rows, {sortCol: 0, sortDir: -1})}`;
+}
+window.__rosterBy = m => {
+  rosterMode = m;
+  const box = document.getElementById("rosterBox");
+  if (box) box.innerHTML = rosterTableHTML(box.dataset.y);
+};
+function rosterHTML(y) {
+  const s = L.seasons[y];
+  if (!s.rosters) return "";
+  const rows = rosterRows(y).sort((a, b) => a.avgAll - b.avgAll);
+  if (!rows.length) return "";
+  const wk = Math.max(0, ...s.matchups.map(m => m.w));
+  const best = rows[0], worst = rows[rows.length - 1];
+  return `
+  <h2>Roster rankings <span class="dim small">best player at every slot${wk ? `, ranked through week ${wk}` : ""}</span></h2>
+  <p class="sub">Each team's top-ranked player at every starting spot, whoever actually started. The tag is his rank at his position on season fantasy points: RB4 is the fourth-highest-scoring running back in football. FLEX is the best RB, WR or TE left after the others are filled. Teams are ranked on the average of those ten positional ranks, lower is better; use the buttons to rank on one position group instead. Hover or tap a tag for the player. Deepest on paper: <b>${esc(teamOf(y, best.tid))}</b>. Thinnest: <b>${esc(teamOf(y, worst.tid))}</b>.</p>
+  <div id="rosterBox" data-y="${y}">${rosterTableHTML(y)}</div>
+  <p class="legend"><span><span class="chip pos">green</span> top three in that column</span><span><span class="chip neg">red</span> bottom three</span><span>Ranks use season totals, so a guy who missed games ranks lower. The FLEX counts at his own positional rank.</span></p>`;
 }
 
 // "If the playoffs started today": seeds straight from the current standings,
 // laid out the way Yahoo runs this league's bracket (fixed, no reseeding — the
 // 1 seed meets the 4/5 winner, the 2 seed the 3/6 winner, as in 2024 and 2025).
-function projectedBracketHTML(y, odds = {}) {
+function projectedBracketHTML(y, odds = {}, consolation = false) {
   const s = L.seasons[y];
-  const n = s.settings.playoff_teams || 6;
+  const np = s.settings.playoff_teams || 6;
   const start = s.settings.playoff_start;
   const ranked = Object.keys(s.teams).filter(t => s.reg[t].reg_rank).sort((a, b) => s.reg[a].reg_rank - s.reg[b].reg_rank);
-  if (ranked.length < n) return "";
-  const seedTid = k => ranked[k - 1];
+  // Yahoo's consolation bracket is the next block of seeds below the playoff
+  // line (7-12 here), run in exactly the same fixed format; anyone below that sits out.
+  const off = consolation ? np : 0;
+  const n = consolation ? Math.min(np, ranked.length - np) : np;
+  if (n < 2 || ranked.length < off + n) return "";
+  const seedTid = k => ranked[off + k - 1];
+  const sd = k => off + k;                       // the seed number Yahoo shows
+  const ord = v => v + (v % 100 >= 11 && v % 100 <= 13 ? "th" : ({1: "st", 2: "nd", 3: "rd"}[v % 10] || "th"));
   let size = 2; while (size < n) size *= 2;
   // standard fixed pairings, e.g. size 8 -> 1v8, 4v5, 3v6, 2v7
   let order = [1, 2];
@@ -856,13 +906,13 @@ function projectedBracketHTML(y, odds = {}) {
   for (let i = 0; i < order.length; i += 2) pairs.push([order[i], order[i + 1]]);
   // bottom half drawn upside down so the 2 seed sits at the foot of the bracket
   pairs.splice(pairs.length / 2, pairs.length / 2, ...pairs.slice(pairs.length / 2).reverse());
-  const names = ["Final", "Semifinal", "Quarterfinal", "Round of 16"];
+  const names = [consolation ? ord(off + 1) + " place game" : "Final", "Semifinal", "Quarterfinal", "Round of 16"];
   const rounds = Math.log2(size);
   const r = s.reg;
-  const team = (k, w) => {
+  const team = k => {
     const t = seedTid(k);
     const o = odds[t];
-    return `<div class="side"><span class="seed num">${k}</span><span class="t">${esc(teamOf(y, t))}
+    return `<div class="side"><span class="seed num">${sd(k)}</span><span class="t">${esc(teamOf(y, t))}
       <span class="dim small">${mdisp(mgrOfTeam(y, t))}</span></span>
       <span class="s small"><span class="num">${rec(r[t].w, r[t].l, r[t].t)}</span>${o != null ? ` <span class="dim">· ${o >= 99.5 ? ">99" : o < 1 ? "<1" : o.toFixed(0)}%</span>` : ""}</span></div>`;
   };
@@ -881,18 +931,35 @@ function projectedBracketHTML(y, odds = {}) {
     // what advances: a seed facing a bye goes straight through
     const rn = names[rounds - 1 - k];
     const adv = slots.map(([a, b], i) => typeof a === "number" && typeof b === "number"
-      ? (b > n ? a : a > n ? b : `Winner of ${a}/${b}`)
+      ? (b > n ? a : a > n ? b : `Winner of ${sd(a)}/${sd(b)}`)
       : slots.length === 2 ? `${i ? "Bottom" : "Top"} ${rn.toLowerCase()} winner` : `${rn} ${i + 1} winner`);
     if (adv.length < 2) break;
     slots = [];
     for (let i = 0; i < adv.length; i += 2) slots.push([adv[i], adv[i + 1]]);
   }
+  // the placement games Yahoo runs alongside a 6-team bracket: quarterfinal
+  // losers play for 5th (11th in the consolation), semifinal losers for 3rd (9th)
+  if (n === 6 && rounds === 3) {
+    const g = (title, wk, x, y2) => `<div><div class="round-title" style="font-size:10.5px;margin-bottom:3px">${title}${wk ? " · wk " + wk : ""}</div><div class="game">${tbd(x)}${tbd(y2)}</div></div>`;
+    cols.push(`<div class="round"><div class="round-title">Placement games</div>
+      ${g(ord(off + 5) + " place", start ? start + 1 : null, `Loser of ${sd(4)}/${sd(5)}`, `Loser of ${sd(3)}/${sd(6)}`)}
+      ${g(ord(off + 3) + " place", start ? start + 2 : null, "Top semifinal loser", "Bottom semifinal loser")}</div>`);
+  }
+  const wins = t => r[t].w + 0.5 * r[t].t;
+  if (consolation) {
+    const out = ranked.slice(off + n).map(t =>
+      `<span><b>${r[t].reg_rank}.</b> ${esc(teamOf(y, t))} <span class="num">${rec(r[t].w, r[t].l, r[t].t)}</span></span>`).join("");
+    return `
+  <h2>Consolation bracket <span class="dim small">if it started today · seeds ${off + 1}–${off + n}</span></h2>
+  <p class="sub">The six teams just below the playoff line play their own bracket for ${ord(off + 1)} place, in the same fixed format: seeds ${sd(1)} and ${sd(2)} get the bye, ${sd(4)} plays ${sd(5)}, ${sd(3)} plays ${sd(6)}, no reseeding. Same layout Yahoo used in 2024 and 2025. The percentage is still each team's chance of climbing into the real playoffs.</p>
+  <div class="bracket">${cols.join("")}</div>
+  ${out ? `<p class="legend"><span><b>Sitting it out:</b></span>${out}</p>` : ""}`;
+  }
   // first teams out, and how far back they sit
   const lastIn = seedTid(n);
-  const wins = t => r[t].w + 0.5 * r[t].t;
   const bubble = ranked.slice(n, n + 3).map(t => {
     const gb = wins(lastIn) - wins(t);
-    return `<span><b>${s.reg[t].reg_rank}.</b> ${esc(teamOf(y, t))} <span class="num">${rec(r[t].w, r[t].l, r[t].t)}</span> <span class="dim">— ${gb ? `${gb} game${gb === 1 ? "" : "s"} back` : "level on wins, behind on points"}</span></span>`;
+    return `<span><b>${r[t].reg_rank}.</b> ${esc(teamOf(y, t))} <span class="num">${rec(r[t].w, r[t].l, r[t].t)}</span> <span class="dim">— ${gb ? `${gb} game${gb === 1 ? "" : "s"} back` : "level on wins, behind on points"}</span></span>`;
   }).join("");
   return `
   <h2>If the playoffs started today <span class="dim small">${n}-team bracket from week ${start ?? "?"}</span></h2>
