@@ -701,6 +701,7 @@ views.now = () => {
   <h2>Playoff odds <span class="dim small">projected</span></h2>
   <p class="sub">${SIMS.toLocaleString()} simulated finishes of the remaining ${remaining.length} regular-season games, each played out score by score so tied records break on points for, the way Yahoo breaks them. Team strength is simply each team's average score this season — no projections, byes or injuries. On top of that the simulation carries three kinds of uncertainty, each measured from this league's own history: weekly swings, doubt about how good a team really is after only a few games, and teams genuinely getting better or worse as the season goes on. ${played ? "" : "With no games played yet, every team starts equal."} ${played >= 2 ? "" : "These firm up meaningfully once about two weeks are in the books."}</p>
   ${table(projCols, projRows, {sortCol: 3, sortDir: -1})}
+  ${played && s.in_progress ? projectedBracketHTML(y, Object.fromEntries(projRows.map(r => [r.tid, r.settled.out ? 0 : r.settled.clinched ? 100 : r.po]))) : ""}
   ${bumpChart}
 
   ${(() => {
@@ -780,6 +781,69 @@ function bracketHTML(y) {
       `<div><div class="round-title" style="font-size:10.5px;margin-bottom:3px">${esc(g.round)}</div>${side(g)}</div>`).join("")}</div>`);
   }
   return `<div class="bracket">${cols.join("")}</div>`;
+}
+
+// "If the playoffs started today": seeds straight from the current standings,
+// laid out the way Yahoo runs this league's bracket (fixed, no reseeding — the
+// 1 seed meets the 4/5 winner, the 2 seed the 3/6 winner, as in 2024 and 2025).
+function projectedBracketHTML(y, odds = {}) {
+  const s = L.seasons[y];
+  const n = s.settings.playoff_teams || 6;
+  const start = s.settings.playoff_start;
+  const ranked = Object.keys(s.teams).filter(t => s.reg[t].reg_rank).sort((a, b) => s.reg[a].reg_rank - s.reg[b].reg_rank);
+  if (ranked.length < n) return "";
+  const seedTid = k => ranked[k - 1];
+  let size = 2; while (size < n) size *= 2;
+  // standard fixed pairings, e.g. size 8 -> 1v8, 4v5, 3v6, 2v7
+  let order = [1, 2];
+  while (order.length < size) order = order.flatMap(x => [x, order.length * 2 + 1 - x]);
+  const pairs = [];
+  for (let i = 0; i < order.length; i += 2) pairs.push([order[i], order[i + 1]]);
+  // bottom half drawn upside down so the 2 seed sits at the foot of the bracket
+  pairs.splice(pairs.length / 2, pairs.length / 2, ...pairs.slice(pairs.length / 2).reverse());
+  const names = ["Final", "Semifinal", "Quarterfinal", "Round of 16"];
+  const rounds = Math.log2(size);
+  const r = s.reg;
+  const team = (k, w) => {
+    const t = seedTid(k);
+    const o = odds[t];
+    return `<div class="side"><span class="seed num">${k}</span><span class="t">${esc(teamOf(y, t))}
+      <span class="dim small">${mdisp(mgrOfTeam(y, t))}</span></span>
+      <span class="s small"><span class="num">${rec(r[t].w, r[t].l, r[t].t)}</span>${o != null ? ` <span class="dim">· ${o >= 99.5 ? ">99" : o < 1 ? "<1" : o.toFixed(0)}%</span>` : ""}</span></div>`;
+  };
+  const tbd = label => `<div class="side"><span class="seed"></span><span class="t dim small">${label}</span><span class="s"></span></div>`;
+  const bye = `<div class="side"><span class="seed"></span><span class="t dim small">Bye</span><span class="s"></span></div>`;
+  // slot labels carried round to round: a seed number, or "Winner of 4/5"
+  let slots = pairs;
+  const cols = [];
+  for (let k = 0; k < rounds; k++) {
+    const wk = start ? start + k : null;
+    const games = slots.map(([a, b]) => {
+      const side = x => typeof x === "number" ? (x <= n ? team(x) : bye) : tbd(x);
+      return `<div class="game">${side(a)}${side(b)}</div>`;
+    });
+    cols.push(`<div class="round"><div class="round-title">${names[rounds - 1 - k]}${wk ? " · wk " + wk : ""}</div>${games.join("")}</div>`);
+    // what advances: a seed facing a bye goes straight through
+    const rn = names[rounds - 1 - k];
+    const adv = slots.map(([a, b], i) => typeof a === "number" && typeof b === "number"
+      ? (b > n ? a : a > n ? b : `Winner of ${a}/${b}`)
+      : slots.length === 2 ? `${i ? "Bottom" : "Top"} ${rn.toLowerCase()} winner` : `${rn} ${i + 1} winner`);
+    if (adv.length < 2) break;
+    slots = [];
+    for (let i = 0; i < adv.length; i += 2) slots.push([adv[i], adv[i + 1]]);
+  }
+  // first teams out, and how far back they sit
+  const lastIn = seedTid(n);
+  const wins = t => r[t].w + 0.5 * r[t].t;
+  const bubble = ranked.slice(n, n + 3).map(t => {
+    const gb = wins(lastIn) - wins(t);
+    return `<span><b>${s.reg[t].reg_rank}.</b> ${esc(teamOf(y, t))} <span class="num">${rec(r[t].w, r[t].l, r[t].t)}</span> <span class="dim">— ${gb ? `${gb} game${gb === 1 ? "" : "s"} back` : "level on wins, behind on points"}</span></span>`;
+  }).join("");
+  return `
+  <h2>If the playoffs started today <span class="dim small">${n}-team bracket from week ${start ?? "?"}</span></h2>
+  <p class="sub">Seeded straight from the current standings — record first, points for to break ties, exactly how Yahoo seeds it. The top ${size - n} get a first-round bye. No reseeding: the 1 seed draws the 4/5 winner, the 2 seed the 3/6 winner. The percentage beside each team is its chance of making the playoffs at all, from the simulation above.</p>
+  <div class="bracket">${cols.join("")}</div>
+  ${bubble ? `<p class="legend"><span><b>On the outside looking in:</b></span>${bubble}</p>` : ""}`;
 }
 
 views.season = (y) => {
