@@ -577,6 +577,7 @@ views.now = () => {
   const bar = (v, color = "var(--accent)") => `<svg width="80" height="10" viewBox="0 0 80 10" style="vertical-align:middle"><rect x="0" y="1" width="${(0.8 * v).toFixed(1)}" height="8" rx="3" fill="${color}" opacity=".8"/></svg>`;
   const projCols = [
     {h: "Team", val: r => teamOf(y, r.tid), fmt: r => `${esc(teamOf(y, r.tid))} <span class="dim small">${mdisp(r.mk)}</span>`},
+    {h: "Record", num: 1, val: r => s.reg[r.tid].w + 0.5 * s.reg[r.tid].t, fmt: r => `<span class="num">${rec(s.reg[r.tid].w, s.reg[r.tid].l, s.reg[r.tid].t)}</span>`},
     {h: "Proj. wins", num: 1, val: r => r.projW, fmt: r => `<b class="num">${r.projW.toFixed(1)}</b><span class="dim small">-${(totalGames - r.projW).toFixed(1)}</span>`},
     {h: "Playoffs", num: 1, val: r => r.settled.out ? -1 : r.settled.clinched ? 101 : r.po,
      fmt: r => `${bar(r.settled.out ? 0 : r.settled.clinched ? 100 : r.po)} <span class="num"><b>${pct(r.po, !r.settled.out, r.settled.clinched)}</b></span>`},
@@ -699,7 +700,7 @@ views.now = () => {
   ${played ? guillotineHTML(y) : ""}
   <h2>Playoff odds <span class="dim small">projected</span></h2>
   <p class="sub">${SIMS.toLocaleString()} simulated finishes of the remaining ${remaining.length} regular-season games, each played out score by score so tied records break on points for, the way Yahoo breaks them. Team strength is simply each team's average score this season — no projections, byes or injuries. On top of that the simulation carries three kinds of uncertainty, each measured from this league's own history: weekly swings, doubt about how good a team really is after only a few games, and teams genuinely getting better or worse as the season goes on. ${played ? "" : "With no games played yet, every team starts equal."} ${played >= 2 ? "" : "These firm up meaningfully once about two weeks are in the books."}</p>
-  ${table(projCols, projRows, {sortCol: 2, sortDir: -1})}
+  ${table(projCols, projRows, {sortCol: 3, sortDir: -1})}
   ${bumpChart}
 
   ${(() => {
