@@ -424,9 +424,19 @@ views.now = () => {
   const n = Object.keys(s.teams).length;
   const prevY = String(+y - 1);
   const medRec = medianRecords(y);
+  // current streak from the regular-season results, newest game first:
+  // +n = n straight wins, -n = n straight losses
+  const streak = {};
+  for (const tid of Object.keys(s.teams)) {
+    const res = s.matchups.filter(m => m.a === tid || m.b === tid).sort((a, b) => b.w - a.w)
+      .map(m => { const me = m.a === tid ? m.as : m.bs, op = m.a === tid ? m.bs : m.as; return me > op ? 1 : me < op ? -1 : 0; });
+    let n = 0;
+    for (const r of res) { if (!r || (n && Math.sign(n) !== r)) break; n += r; }
+    streak[tid] = n;
+  }
   const rows = Object.keys(s.teams).map(tid => {
     const mk = mgrOfTeam(y, tid);
-    return {tid, mk, ...s.reg[tid], ...medRec[tid], moves: s.standings[tid]?.moves, div: s.standings[tid]?.division,
+    return {tid, mk, ...s.reg[tid], ...medRec[tid], streak: streak[tid], moves: s.standings[tid]?.moves, div: s.standings[tid]?.division,
       prevFin: L.managers[mk]?.seasons?.[prevY]?.final_rank ?? null,
       titles: L.managers[mk]?.career.titles ?? 0, finq: finishQuality(mk)};
   });
@@ -436,6 +446,8 @@ views.now = () => {
     {h: "Manager", val: r => mname(r.mk), fmt: r => mlink(r.mk)},
     {h: "Div", val: r => r.div || ""},
     {h: "W-L", num: 1, val: r => r.w + 0.5 * r.t, fmt: r => `<span class="num">${rec(r.w, r.l, r.t)}</span>`},
+    {h: "Streak", num: 1, val: r => r.streak, fmt: r => !r.streak ? `<span class="dim">—</span>`
+      : `<b class="num ${r.streak > 0 ? "pos" : "neg"}">${r.streak > 0 ? "W" : "L"}${Math.abs(r.streak)}</b>${r.streak >= 3 ? " 🔥" : r.streak <= -3 ? " 🧊" : ""}`},
     {h: "vs median", num: 1, val: r => r.med_w + 0.5 * r.med_t, fmt: r => `<span class="num">${rec(r.med_w, r.med_l, r.med_t)}</span>`},
     {h: "W-L + median", num: 1, val: r => r.cmb_pct, fmt: r => {
       const d = r.reg_rank - r.cmb_rank;
@@ -675,7 +687,7 @@ views.now = () => {
   </div>
   <h2>${played ? "Standings so far" : "The field"} <span class="dim small">with career résumés</span></h2>
   ${table(cols, rows, {sortCol: played ? 0 : 1, sortDir: 1})}
-  <p class="legend"><span>“vs median” = a second game each week against the league's middle score.</span><span>“W-L + median” = your record if both games counted, and where that would rank you.</span><span>“All-play” = record if you'd played every team every week.</span><span>“Luck” = wins minus deserved wins from all-play.</span></p>
+  <p class="legend"><span>“Streak” = current run of straight wins (W) or losses (L).</span><span>“vs median” = a second game each week against the league's middle score.</span><span>“W-L + median” = your record if both games counted, and where that would rank you.</span><span>“All-play” = record if you'd played every team every week.</span><span>“Luck” = wins minus deserved wins from all-play.</span></p>
   <p class="note" style="margin-top:10px"><b>W-L + median</b> is the standings under a two-games-a-week format: your real matchup plus a game against the median score of the whole league that week. Beat the median and you bank a second win; fall short and you eat a second loss. It halves the damage a brutal schedule can do, because half your games are against the same opponent as everyone else. ▲ and ▼ show how many places you'd move against the real table${rows.some(r => r.cmb_t) ? "; a tie only happens when a score lands exactly on the median" : ""}.</p>
   <p class="note" style="margin-top:8px"><b>Career finish</b> is a manager's average finishing position across every season they've played, rescaled so the 8-, 10-, 12-, and 14-team eras compare fairly: <b>100%</b> = won the title, <b>0%</b> = finished last, <b>50%</b> = dead middle of the pack. Finishing 3rd of 12 scores 82%; 3rd of 8 scores 71% — same trophy shelf, different degree of difficulty. The Titles and “${prevY} finish” columns are single facts — how many rings, where you ended last year. Career finish is the average of every year. Rookies have no history yet.</p>
   <p class="note" style="margin-top:8px"><b>Luck</b> compares your real record to your <b>all-play</b> record — what you'd be if you played every team every week. Post the 3rd-best score of 14 and you go 11-2 in all-play that week whether your actual opponent beat you or not. Scale that to real games and you get the wins your scores <em>deserved</em>; Luck is actual wins minus deserved wins. <b>+2.0</b> means the schedule handed you two wins your scoring didn't earn; <b>−2.0</b> means you kept drawing the week's hottest team. It's the difference between a good team and a good draw.</p>
