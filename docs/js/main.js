@@ -951,9 +951,9 @@ function projectedBracketHTML(y, odds = {}, consolation = false) {
       `<span><b>${r[t].reg_rank}.</b> ${esc(teamOf(y, t))} <span class="num">${rec(r[t].w, r[t].l, r[t].t)}</span></span>`).join("");
     return `
   <h2>Consolation bracket <span class="dim small">if it started today · seeds ${off + 1}–${off + n}</span></h2>
-  <p class="sub">The six teams just below the playoff line play their own bracket for ${ord(off + 1)} place, in the same fixed format: seeds ${sd(1)} and ${sd(2)} get the bye, ${sd(4)} plays ${sd(5)}, ${sd(3)} plays ${sd(6)}, no reseeding. Same layout Yahoo used in 2024 and 2025. The percentage is still each team's chance of climbing into the real playoffs.</p>
+  <p class="sub">The six teams just below the playoff line play their own bracket for ${ord(off + 1)} place, in the same fixed format: seeds ${sd(1)} and ${sd(2)} get the bye, ${sd(4)} plays ${sd(5)}, ${sd(3)} plays ${sd(6)}, no reseeding. This matches the projected consolation bracket on Yahoo. Anyone below seed ${off + n} isn’t in it, so their season ends after week ${start ? start - 1 : 14}. The percentage is still each team's chance of climbing into the real playoffs.</p>
   <div class="bracket">${cols.join("")}</div>
-  ${out ? `<p class="legend"><span><b>Sitting it out:</b></span>${out}</p>` : ""}`;
+  ${out ? `<p class="legend"><span><b>Not in either bracket, season over after week ${start ? start - 1 : 14}:</b></span>${out}</p>` : ""}`;
   }
   // first teams out, and how far back they sit
   const lastIn = seedTid(n);
