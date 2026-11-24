@@ -134,6 +134,8 @@ const filterPills = (note) => `<div class="pill-tabs">
 const mlink = mk => `<a class="mgr-link" href="#/manager/${encodeURIComponent(mk)}">${mdisp(mk)}</a>`;
 const mkeyOf = name => String(name || "").replace(/\s+/g, " ").trim().toLowerCase();
 const years = () => L.league.years.map(String);
+// division winner: Yahoo's dagger in the final standings (finished seasons only)
+const isDivChamp = (y, tid) => !L.seasons[y].in_progress && (L.seasons[y].standings[tid]?.flags || "").includes("\u2020");
 const lastSeason = () => String(Math.max(...L.league.years));
 
 function teamOf(y, tid) {
@@ -440,11 +442,19 @@ views.now = () => {
       prevFin: L.managers[mk]?.seasons?.[prevY]?.final_rank ?? null,
       titles: L.managers[mk]?.career.titles ?? 0, finq: finishQuality(mk)};
   });
+  // division leader: best standings rank in the division (Yahoo's tiebreaks
+  // already applied); once the season is final, Yahoo's own champion mark
+  const divLead = {};
+  for (const r of rows) if (r.div) {
+    const cur = divLead[r.div];
+    if (s.in_progress ? (!cur || r.reg_rank < s.reg[cur].reg_rank) : isDivChamp(y, r.tid)) divLead[r.div] = r.tid;
+  }
   const cols = [
     {h: "#", num: 1, val: r => r.reg_rank},
     {h: "Team", val: r => teamOf(y, r.tid), fmt: r => esc(teamOf(y, r.tid))},
     {h: "Manager", val: r => mname(r.mk), fmt: r => mlink(r.mk)},
-    {h: "Div", val: r => r.div || ""},
+    {h: "Div", val: r => r.div || "", fmt: r => `${esc(r.div || "")}${r.div && divLead[r.div] === r.tid
+      ? ` <span class="chip ${s.in_progress ? "pos" : "gold"}" data-tip="${s.in_progress ? "Leads the " + esc(r.div) + " division" : esc(r.div) + " division champion"}">${s.in_progress ? "leads" : "champ"}</span>` : ""}`},
     {h: "W-L", num: 1, val: r => r.w + 0.5 * r.t, fmt: r => `<span class="num">${rec(r.w, r.l, r.t)}</span>`},
     {h: "Streak", num: 1, val: r => r.streak, fmt: r => !r.streak ? `<span class="dim">—</span>`
       : `<b class="num ${r.streak > 0 ? "pos" : "neg"}">${r.streak > 0 ? "W" : "L"}${Math.abs(r.streak)}</b>${r.streak >= 3 ? " 🔥" : r.streak <= -3 ? " 🧊" : ""}`},
@@ -990,7 +1000,8 @@ views.season = (y) => {
     {h: "Weekly highs", num: 1, val: r => r.crowns},
     {h: "Moves", num: 1, val: r => r.moves, fmt: r => int(r.moves)},
   ];
-  if (rows.some(r => r.div)) cols.splice(3, 0, {h: "Div", val: r => r.div || ""});
+  if (rows.some(r => r.div)) cols.splice(3, 0, {h: "Div", val: r => r.div || "",
+    fmt: r => `${esc(r.div || "")}${isDivChamp(y, r.tid) ? ` <span class="chip gold" data-tip="${esc(r.div)} division champion">champ</span>` : ""}`});
 
   return `
   <a class="backlink" href="#/seasons">← All seasons</a>
@@ -1415,6 +1426,7 @@ views.managers = () => {
     {h: "Pct", num: 1, val: r => r.tpct, fmt: r => pctf(r.tpct)},
     {h: "All-play", num: 1, val: r => r.apw / Math.max(r.apw + r.apl, 1), fmt: r => `<span class="num">${r.apw}-${r.apl}</span> <span class="dim small">${pctf(r.apw / Math.max(r.apw + r.apl, 1))}</span>`},
     {h: "Titles", num: 1, val: r => r.titles, fmt: r => r.titles ? "🏆".repeat(r.titles) : "—"},
+    {h: "Div titles", num: 1, val: r => r.div_titles || 0, fmt: r => r.div_titles || "—"},
     {h: "Podiums", num: 1, val: r => r.podiums},
     {h: "Playoff apps", num: 1, val: r => r.playoff_apps},
     {h: "Avg finish", num: 1, val: r => r.avg_finish, fmt: r => num(r.avg_finish, 1)},
@@ -1536,7 +1548,7 @@ views.manager = (mk) => {
         const shelf = "🏆 ".repeat(c.titles) + "🥈 ".repeat(silv) + "🥉 ".repeat(brnz) + "💀 ".repeat(c.last_places);
         return `<p style="font-size:15px;margin:8px 0 0">${shelf.trim() || "<span class='dim'>A clean, trophy-less record.</span>"}</p>`;
       })()}
-      <p class="dim small" style="margin-top:10px">${c.playoff_apps} playoff trips · ${c.crowns} weekly high scores · avg draft slot ${num(c.avg_draft_slot, 1)}</p></div>
+      <p class="dim small" style="margin-top:10px">${c.div_titles ? `${c.div_titles} division title${c.div_titles === 1 ? "" : "s"} · ` : ""}${c.playoff_apps} playoff trips · ${c.crowns} weekly high scores · avg draft slot ${num(c.avg_draft_slot, 1)}</p></div>
   </div>
 
   <h2>Season by season</h2>
@@ -1550,7 +1562,7 @@ views.manager = (mk) => {
 views.honors = () => {
   const ys = years();
   const add = (map, mk, y) => { if (mk && inc(mk)) (map[mk] = map[mk] || []).push(+y); };
-  const titles = {}, regs = {}, pts = {}, paT = {};
+  const titles = {}, regs = {}, pts = {}, paT = {}, divs = {};
   const sackos = [];
   for (const c of L.league.champions) add(titles, mkeyOf(c.manager), c.year);
   for (const y of ys) {
@@ -1559,6 +1571,7 @@ views.honors = () => {
     const tids = Object.keys(s.teams);
     const regChamp = tids.find(t => s.reg[t].reg_rank === 1);
     add(regs, mgrOfTeam(y, regChamp), y);
+    for (const t of tids) if (isDivChamp(y, t)) add(divs, mgrOfTeam(y, t), y);
     const ptsT = tids.reduce((m, t) => s.reg[t].pf > s.reg[m].pf ? t : m, tids[0]);
     add(pts, mgrOfTeam(y, ptsT), y);
     const paTid = tids.reduce((m, t) => s.reg[t].pa > s.reg[m].pa ? t : m, tids[0]);
@@ -1615,7 +1628,8 @@ views.honors = () => {
   <div class="grid cols-3">${honorList(titles, "Championships")}
     ${honorList(regs, "Regular-season titles (best record)")}
     ${honorList(pts, "Points titles (most PF)")}
-    ${honorList(paT, "Most points against (human shield award)")}</div>
+    ${honorList(paT, "Most points against (human shield award)")}
+    ${Object.keys(divs).length ? honorList(divs, "Division titles (divisions since 2024)") : ""}</div>
 
   <h2>🥇 Medal table <span class="dim small">Olympic rules: sorted by gold, then silver, then bronze</span></h2>
   ${table([

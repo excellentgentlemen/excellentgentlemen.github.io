@@ -585,6 +585,8 @@ def build():
                 "reg_rank": r["reg_rank"],
                 "final_rank": None if ip else st.get("final_rank"),
                 "division": st.get("division"),
+                # Yahoo marks division winners with a dagger in the final standings
+                "div_champ": (not ip) and "\u2020" in (st.get("flags") or ""),
                 "moves": st.get("moves"),
                 "result": result,
                 "last_place": (not ip) and st.get("final_rank") == n_teams,
@@ -611,6 +613,7 @@ def build():
             "best_finish": min(finishes) if finishes else None,
             "worst_finish": max(finishes) if finishes else None,
             "titles": sum(1 for _, s in games if s["result"] == "champion"),
+            "div_titles": sum(1 for _, s in games if s.get("div_champ")),
             "podiums": sum(1 for _, s in games if s["result"] in ("champion", "runner-up", "third")),
             "last_places": sum(1 for _, s in games if s["last_place"]),
             "playoff_apps": sum(1 for _, s in games if s["result"] in ("champion", "runner-up", "third", "made-playoffs")),
